@@ -8,6 +8,7 @@ import {
   LogOut,
   ShieldCheck,
   Calendar,
+  Settings,
 } from 'lucide-react';
 import {
   supabase,
@@ -23,6 +24,7 @@ import { PasscodeModal } from './components/PasscodeModal';
 import { TeacherUploadModal } from './components/TeacherUploadModal';
 import { CommentDrawer } from './components/CommentDrawer';
 import { ArtworkLightbox } from './components/ArtworkLightbox';
+import { AdminDashboardModal } from './components/AdminDashboardModal';
 
 export default function App() {
   const [activeTab, setActiveTab] = useState<'timeline' | 'weekly'>('timeline');
@@ -34,11 +36,18 @@ export default function App() {
   // 弹窗控制状态
   const [showPasscodeModal, setShowPasscodeModal] = useState(false);
   const [showUploadModal, setShowUploadModal] = useState(false);
-  const [showTeacherLogin, setShowTeacherLogin] = useState(
-    () =>
-      window.location.pathname.endsWith('/teacher/login') ||
-      window.location.hash === '#/teacher/login'
-  );
+  const [showAdminDashboard, setShowAdminDashboard] = useState(false);
+  const [pendingOpenAdmin, setPendingOpenAdmin] = useState(false);
+  const [showTeacherLogin, setShowTeacherLogin] = useState(() => {
+    const p = window.location.pathname;
+    const h = window.location.hash;
+    return (
+      p.endsWith('/teacher/login') ||
+      p.endsWith('/admin') ||
+      h === '#/teacher/login' ||
+      h === '#/admin'
+    );
+  });
   const [activeCommentArtwork, setActiveCommentArtwork] = useState<Artwork | null>(null);
   const [lightboxArtwork, setLightboxArtwork] = useState<Artwork | null>(null);
 
@@ -85,17 +94,28 @@ export default function App() {
       }
     }
     if (weekData && weekData.length > 0) setWeeks(weekData);
-    if (artData && artData.length > 0) setArtworks(artData as Artwork[]);
+    if (artData) setArtworks(artData as Artwork[]);
   };
 
   useEffect(() => {
     loadGalleryData();
 
+    const isEnteringAdminRoute =
+      window.location.pathname.endsWith('/admin') || window.location.hash === '#/admin';
+    if (isEnteringAdminRoute) {
+      setPendingOpenAdmin(true);
+    }
+
     if (!isSupabaseConfigured) return;
 
     // 监听 Supabase Auth 老师认证状态
     supabase.auth.getSession().then(({ data }) => {
-      setIsTeacherAuthenticated(!!data.session);
+      const authed = !!data.session;
+      setIsTeacherAuthenticated(authed);
+      if (authed && isEnteringAdminRoute) {
+        setShowTeacherLogin(false);
+        setShowAdminDashboard(true);
+      }
     });
     const { data: authListener } = supabase.auth.onAuthStateChange((_event, session) => {
       setIsTeacherAuthenticated(!!session);
@@ -130,6 +150,10 @@ export default function App() {
     if (!isSupabaseConfigured) {
       setIsTeacherAuthenticated(true);
       setShowTeacherLogin(false);
+      if (pendingOpenAdmin) {
+        setShowAdminDashboard(true);
+        setPendingOpenAdmin(false);
+      }
       return;
     }
     const { error } = await supabase.auth.signInWithPassword({
@@ -140,6 +164,10 @@ export default function App() {
       alert('登录失败：' + error.message);
     } else {
       setShowTeacherLogin(false);
+      if (pendingOpenAdmin) {
+        setShowAdminDashboard(true);
+        setPendingOpenAdmin(false);
+      }
     }
   };
 
@@ -413,7 +441,7 @@ export default function App() {
         </main>
       )}
 
-      {/* 底部隐蔽式老师通道入口 */}
+      {/* 底部老师后台管理与工作台入口 */}
       <footer className="mt-12 py-6 text-center text-[11px] text-stone-400">
         {isTeacherAuthenticated ? (
           <div className="inline-flex items-center gap-3 rounded-full bg-emerald-50 px-4 py-1.5 text-emerald-700 border border-emerald-200">
@@ -421,9 +449,16 @@ export default function App() {
               <ShieldCheck className="h-3.5 w-3.5" /> 老师管理模式已激活
             </span>
             <button
+              onClick={() => setShowAdminDashboard(true)}
+              className="font-bold text-amber-700 underline"
+            >
+              进入后台管理
+            </button>
+            <button
               onClick={() => {
                 if (isSupabaseConfigured) supabase.auth.signOut();
                 setIsTeacherAuthenticated(false);
+                setShowAdminDashboard(false);
               }}
               className="flex items-center gap-1 text-rose-600 underline"
             >
@@ -431,31 +466,50 @@ export default function App() {
             </button>
           </div>
         ) : (
-          <button
-            onClick={() => setShowTeacherLogin(true)}
-            className="opacity-50 hover:opacity-100 transition"
-          >
-            © 2026 少儿美育成长空间 · 老师教学工作台入口
-          </button>
+          <div className="flex items-center justify-center gap-3">
+            <button
+              onClick={() => {
+                setPendingOpenAdmin(true);
+                setShowTeacherLogin(true);
+              }}
+              className="opacity-60 hover:opacity-100 transition underline"
+            >
+              © 2026 少儿美育成长空间 · 老师后台管理入口
+            </button>
+          </div>
         )}
       </footer>
 
-      {/* 老师已登录时：悬浮“随堂拍照上传” FAB 按钮 */}
+      {/* 老师已登录时：悬浮双按钮（后台管理中心 + 随堂拍照点评） */}
       {isTeacherAuthenticated && (
-        <button
-          onClick={() => setShowUploadModal(true)}
-          className="fixed bottom-6 right-5 z-40 flex items-center gap-2 rounded-full bg-stone-900 px-5 py-3.5 text-xs font-bold text-white shadow-xl shadow-stone-900/30 active:scale-95"
-        >
-          <Camera className="h-4 w-4 text-amber-400" />
-          <span>随堂拍照点评</span>
-        </button>
+        <div className="fixed bottom-6 right-4 z-40 flex items-center gap-2">
+          <button
+            onClick={() => setShowAdminDashboard(true)}
+            className="flex items-center gap-1.5 rounded-full bg-white px-4 py-3.5 text-xs font-bold text-stone-800 shadow-xl border border-stone-200 active:scale-95"
+          >
+            <Settings className="h-4 w-4 text-amber-500" />
+            <span>后台管理</span>
+          </button>
+          <button
+            onClick={() => setShowUploadModal(true)}
+            className="flex items-center gap-2 rounded-full bg-stone-900 px-5 py-3.5 text-xs font-bold text-white shadow-xl shadow-stone-900/30 active:scale-95"
+          >
+            <Camera className="h-4 w-4 text-amber-400" />
+            <span>随堂拍照点评</span>
+          </button>
+        </div>
       )}
 
-      {/* 老师登录弹窗 (支持底部触发或 /teacher/login 路径) */}
+      {/* 老师登录弹窗 (支持底部触发或 /admin、/teacher/login 路径) */}
       {showTeacherLogin && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-5 backdrop-blur-sm">
           <div className="w-full max-w-xs rounded-3xl bg-white p-6 shadow-2xl space-y-4">
-            <h3 className="text-base font-bold text-stone-800">老师工作台登录</h3>
+            <div>
+              <h3 className="text-base font-bold text-stone-800">老师后台管理登录</h3>
+              <p className="text-[11px] text-stone-400 mt-0.5">
+                请使用在 Supabase Authentication 中创建的老师账号登录
+              </p>
+            </div>
             <form onSubmit={handleTeacherLogin} className="space-y-3">
               <input
                 type="email"
@@ -476,7 +530,10 @@ export default function App() {
               <div className="flex gap-2 pt-1">
                 <button
                   type="button"
-                  onClick={() => setShowTeacherLogin(false)}
+                  onClick={() => {
+                    setShowTeacherLogin(false);
+                    setPendingOpenAdmin(false);
+                  }}
                   className="flex-1 rounded-xl border border-stone-200 py-2.5 text-xs text-stone-600"
                 >
                   取消
@@ -485,7 +542,7 @@ export default function App() {
                   type="submit"
                   className="flex-1 rounded-xl bg-stone-900 py-2.5 text-xs font-semibold text-white"
                 >
-                  登录激活上传
+                  登录进入后台
                 </button>
               </div>
             </form>
@@ -511,6 +568,16 @@ export default function App() {
         students={students}
         weeks={weeks}
         onUploadSuccess={loadGalleryData}
+      />
+
+      <AdminDashboardModal
+        isOpen={showAdminDashboard}
+        onClose={() => setShowAdminDashboard(false)}
+        students={students}
+        weeks={weeks}
+        artworks={artworks}
+        onDataChanged={loadGalleryData}
+        onOpenUploadModal={() => setShowUploadModal(true)}
       />
 
       <CommentDrawer
