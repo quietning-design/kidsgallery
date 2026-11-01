@@ -9,6 +9,8 @@ import {
   ShieldCheck,
   Calendar,
   Settings,
+  Pin,
+  Sparkles,
 } from 'lucide-react';
 import {
   supabase,
@@ -16,6 +18,7 @@ import {
   Student,
   CurriculumWeek,
   Artwork,
+  CommentItem,
   DEMO_STUDENTS,
   DEMO_WEEKS,
   DEMO_ARTWORKS,
@@ -56,7 +59,7 @@ export default function App() {
   const [teacherPassword, setTeacherPassword] = useState('');
   const [isTeacherAuthenticated, setIsTeacherAuthenticated] = useState(false);
 
-  // 加载核心数据
+  // 加载核心数据（包含每个画作关联的 comments 评论列表）
   const loadGalleryData = async () => {
     if (!isSupabaseConfigured) {
       const savedPasscode = localStorage.getItem('gallery_passcode');
@@ -76,7 +79,9 @@ export default function App() {
       supabase.from('curriculum_weeks').select('*').order('start_date', { ascending: false }),
       supabase
         .from('artworks')
-        .select('*, students(id, name, avatar_url), curriculum_weeks(id, week_code, title, theme_desc)')
+        .select(
+          '*, students(id, name, avatar_url), curriculum_weeks(id, week_code, title, theme_desc), comments(id, artwork_id, author_name, author_role, content, created_at)'
+        )
         .order('created_at', { ascending: false }),
     ]);
 
@@ -89,8 +94,10 @@ export default function App() {
         );
         if (matched) setCurrentStudent(matched);
       } else {
-        setCurrentStudent(stuData[0]);
-        setShowPasscodeModal(true);
+        setCurrentStudent((prev) => prev || stuData[0]);
+        if (!localStorage.getItem('gallery_guest_dismissed')) {
+          setShowPasscodeModal(true);
+        }
       }
     }
     if (weekData && weekData.length > 0) setWeeks(weekData);
@@ -121,8 +128,21 @@ export default function App() {
       setIsTeacherAuthenticated(!!session);
     });
 
+    // 全局实时监听新评论或删除评论，让个人时光机卡片下方的评论流实时更新
+    const commentsChannel = supabase
+      .channel('timeline-comments-sync')
+      .on(
+        'postgres_changes',
+        { event: '*', schema: 'public', table: 'comments' },
+        () => {
+          loadGalleryData();
+        }
+      )
+      .subscribe();
+
     return () => {
       authListener.subscription.unsubscribe();
+      supabase.removeChannel(commentsChannel);
     };
   }, []);
 
@@ -286,84 +306,153 @@ export default function App() {
 
           {/* 时间轴作品卡片流 */}
           <div className="relative space-y-5 before:absolute before:left-3 before:top-3 before:bottom-3 before:w-0.5 before:bg-amber-200">
-            {studentArtworks.map((art) => (
-              <div key={art.id} className="relative pl-8">
-                {/* 时间轴圆点 */}
-                <div className="absolute left-1.5 top-4 h-3.5 w-3.5 rounded-full border-2 border-amber-500 bg-[#FAF7F2]" />
+            {studentArtworks.map((art) => {
+              // 拆分并排序评论：老师追加点评置顶在前，家长/匿名访客评论按时间排列在后
+              const rawComments: CommentItem[] = art.comments || [];
+              const teacherExtraComments = rawComments
+                .filter((c) => c.author_role === 'teacher')
+                .sort((a, b) => new Date(a.created_at).getTime() - new Date(b.created_at).getTime());
+              const parentAndGuestComments = rawComments
+                .filter((c) => c.author_role !== 'teacher')
+                .sort((a, b) => new Date(a.created_at).getTime() - new Date(b.created_at).getTime());
 
-                <article className="overflow-hidden rounded-3xl bg-white shadow-sm border border-stone-100">
-                  {/* 画作大图（点击进入手势缩放灯箱） */}
-                  <div
-                    onClick={() => setLightboxArtwork(art)}
-                    className="relative cursor-pointer overflow-hidden bg-stone-100"
-                  >
-                    <img
-                      src={art.image_url}
-                      alt={art.title}
-                      loading="lazy"
-                      className="max-h-80 w-full object-cover transition duration-300 active:scale-105"
-                    />
-                    <span className="absolute left-3 top-3 rounded-full bg-black/60 px-2.5 py-1 text-[10px] font-medium text-amber-300 backdrop-blur-sm">
-                      {art.stage}
-                    </span>
-                  </div>
+              return (
+                <div key={art.id} className="relative pl-8">
+                  {/* 时间轴圆点 */}
+                  <div className="absolute left-1.5 top-4 h-3.5 w-3.5 rounded-full border-2 border-amber-500 bg-[#FAF7F2]" />
 
-                  {/* 作品详情与老师点评 */}
-                  <div className="p-4 space-y-2.5">
-                    <div className="flex items-start justify-between gap-2">
-                      <div>
-                        <h3 className="text-sm font-bold text-stone-800">《{art.title}》</h3>
-                        <p className="text-[11px] text-stone-400">
-                          {art.curriculum_weeks?.week_code} · {art.curriculum_weeks?.title}
-                        </p>
-                      </div>
-                      <span className="text-[10px] text-stone-400 shrink-0">
-                        {new Date(art.created_at).toLocaleDateString()}
+                  <article className="overflow-hidden rounded-3xl bg-white shadow-sm border border-stone-100">
+                    {/* 画作大图（点击进入手势缩放灯箱） */}
+                    <div
+                      onClick={() => setLightboxArtwork(art)}
+                      className="relative cursor-pointer overflow-hidden bg-stone-100"
+                    >
+                      <img
+                        src={art.image_url}
+                        alt={art.title}
+                        loading="lazy"
+                        className="max-h-80 w-full object-cover transition duration-300 active:scale-105"
+                      />
+                      <span className="absolute left-3 top-3 rounded-full bg-black/60 px-2.5 py-1 text-[10px] font-medium text-amber-300 backdrop-blur-sm">
+                        {art.stage}
                       </span>
                     </div>
 
-                    {/* 能力标签 */}
-                    {art.tags?.length > 0 && (
-                      <div className="flex flex-wrap gap-1.5">
-                        {art.tags.map((t) => (
-                          <span
-                            key={t}
-                            className="rounded-full bg-amber-50 px-2.5 py-0.5 text-[10px] font-medium text-amber-700"
+                    {/* 作品详情、置顶老师点评与直接展开的家长评论区 */}
+                    <div className="p-4 space-y-3">
+                      <div className="flex items-start justify-between gap-2">
+                        <div>
+                          <h3 className="text-sm font-bold text-stone-800">《{art.title}》</h3>
+                          <p className="text-[11px] text-stone-400">
+                            {art.curriculum_weeks?.week_code} · {art.curriculum_weeks?.title}
+                          </p>
+                        </div>
+                        <span className="text-[10px] text-stone-400 shrink-0">
+                          {new Date(art.created_at).toLocaleDateString()}
+                        </span>
+                      </div>
+
+                      {/* 能力标签 */}
+                      {art.tags?.length > 0 && (
+                        <div className="flex flex-wrap gap-1.5">
+                          {art.tags.map((t) => (
+                            <span
+                              key={t}
+                              className="rounded-full bg-amber-50 px-2.5 py-0.5 text-[10px] font-medium text-amber-700"
+                            >
+                              #{t}
+                            </span>
+                          ))}
+                        </div>
+                      )}
+
+                      {/* ===== 点评与互动评论流（老师置顶 + 家长/访客评论紧随其后直接展示） ===== */}
+                      <div className="space-y-2 pt-1">
+                        {/* 1. 置顶：老师主点评 */}
+                        {art.teacher_comment && (
+                          <div className="rounded-2xl bg-gradient-to-br from-amber-50 via-amber-50/70 to-orange-50/40 p-3 text-xs leading-relaxed border border-amber-200/80 shadow-sm">
+                            <div className="flex items-center justify-between mb-1">
+                              <div className="flex items-center gap-1.5">
+                                <span className="inline-flex items-center gap-1 rounded-full bg-amber-500 px-2 py-0.5 text-[10px] font-bold text-white">
+                                  <Pin className="h-2.5 w-2.5 rotate-45" />
+                                  置顶 · 老师专业点评
+                                </span>
+                              </div>
+                              <Sparkles className="h-3.5 w-3.5 text-amber-500" />
+                            </div>
+                            <p className="text-stone-800 font-medium mt-1">
+                              {art.teacher_comment}
+                            </p>
+                          </div>
+                        )}
+
+                        {/* 2. 置顶：老师在评论区追加的点评 */}
+                        {teacherExtraComments.map((tc) => (
+                          <div
+                            key={tc.id}
+                            className="rounded-2xl bg-amber-50/60 p-2.5 text-xs leading-relaxed border border-amber-200/60"
                           >
-                            #{t}
-                          </span>
+                            <div className="flex items-center justify-between mb-0.5">
+                              <div className="flex items-center gap-1.5">
+                                <span className="rounded-full bg-amber-500/90 px-2 py-0.5 text-[9px] font-bold text-white">
+                                  置顶 · {tc.author_name}
+                                </span>
+                              </div>
+                              <span className="text-[10px] text-stone-400">
+                                {new Date(tc.created_at).toLocaleDateString()}
+                              </span>
+                            </div>
+                            <p className="text-stone-700 mt-1">{tc.content}</p>
+                          </div>
                         ))}
-                      </div>
-                    )}
 
-                    {/* 老师评语框 */}
-                    {art.teacher_comment && (
-                      <div className="rounded-2xl bg-stone-50 p-3 text-xs text-stone-600 leading-relaxed border border-stone-100">
-                        <span className="font-bold text-stone-800">老师点评：</span>
-                        {art.teacher_comment}
+                        {/* 3. 跟在下方直接展示：父母、亲友或匿名访客的点评与鼓励 */}
+                        {parentAndGuestComments.length > 0 && (
+                          <div className="rounded-2xl bg-stone-50/90 p-3 space-y-2 border border-stone-100">
+                            {parentAndGuestComments.map((c) => (
+                              <div
+                                key={c.id}
+                                className="text-xs leading-relaxed border-b border-stone-200/50 last:border-none pb-2 last:pb-0"
+                              >
+                                <div className="flex items-center justify-between">
+                                  <span className="font-bold text-stone-700">
+                                    {c.author_name}：
+                                  </span>
+                                  <span className="text-[10px] text-stone-400">
+                                    {new Date(c.created_at).toLocaleDateString()}
+                                  </span>
+                                </div>
+                                <p className="text-stone-600 mt-0.5">{c.content}</p>
+                              </div>
+                            ))}
+                          </div>
+                        )}
                       </div>
-                    )}
 
-                    {/* 底部操作栏：唤起互动评论抽屉 */}
-                    <div className="flex items-center justify-between pt-1">
-                      <button
-                        onClick={() => setLightboxArtwork(art)}
-                        className="text-[11px] font-medium text-amber-600"
-                      >
-                        查看高清原图与演变 →
-                      </button>
-                      <button
-                        onClick={() => setActiveCommentArtwork(art)}
-                        className="flex items-center gap-1.5 rounded-full bg-stone-100 px-3 py-1.5 text-xs font-medium text-stone-700 active:scale-95"
-                      >
-                        <MessageCircle className="h-3.5 w-3.5 text-amber-500" />
-                        <span>写鼓励 / 评论</span>
-                      </button>
+                      {/* 底部操作栏：高清原图与写评论按钮 */}
+                      <div className="flex items-center justify-between pt-1">
+                        <button
+                          onClick={() => setLightboxArtwork(art)}
+                          className="text-[11px] font-medium text-amber-600"
+                        >
+                          查看高清原图与演变 →
+                        </button>
+                        <button
+                          onClick={() => setActiveCommentArtwork(art)}
+                          className="flex items-center gap-1.5 rounded-full bg-amber-50 border border-amber-200/80 px-3 py-1.5 text-xs font-semibold text-amber-800 active:scale-95"
+                        >
+                          <MessageCircle className="h-3.5 w-3.5 text-amber-600" />
+                          <span>
+                            写鼓励 / 评论
+                            {rawComments.length > 0 ? ` (${rawComments.length})` : ''}
+                          </span>
+                        </button>
+                      </div>
                     </div>
-                  </div>
-                </article>
-              </div>
-            ))}
+                  </article>
+                </div>
+              );
+            })}
           </div>
         </main>
       )}
@@ -426,9 +515,12 @@ export default function App() {
                           </div>
                           <button
                             onClick={() => setActiveCommentArtwork(art)}
-                            className="rounded-full p-1 text-stone-400 hover:text-amber-600"
+                            className="flex items-center gap-0.5 rounded-full px-1.5 py-0.5 text-[10px] text-stone-400 hover:text-amber-600"
                           >
                             <MessageCircle className="h-3.5 w-3.5" />
+                            {(art.comments?.length || 0) > 0 && (
+                              <span>{art.comments?.length}</span>
+                            )}
                           </button>
                         </div>
                       </div>
@@ -559,7 +651,10 @@ export default function App() {
           setActiveTab('timeline');
           setShowPasscodeModal(false);
         }}
-        onDismissAsGuest={() => setShowPasscodeModal(false)}
+        onDismissAsGuest={() => {
+          localStorage.setItem('gallery_guest_dismissed', '1');
+          setShowPasscodeModal(false);
+        }}
       />
 
       <TeacherUploadModal
@@ -583,7 +678,10 @@ export default function App() {
       <CommentDrawer
         artwork={activeCommentArtwork}
         isTeacher={isTeacherAuthenticated}
-        onClose={() => setActiveCommentArtwork(null)}
+        onClose={() => {
+          setActiveCommentArtwork(null);
+          loadGalleryData();
+        }}
       />
 
       <ArtworkLightbox
