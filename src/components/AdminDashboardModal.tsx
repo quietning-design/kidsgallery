@@ -10,10 +10,8 @@ import {
   Edit3,
   Copy,
   Check,
-  Sparkles,
   RefreshCw,
   BookOpen,
-  Clock,
   Camera,
   Save,
 } from 'lucide-react';
@@ -53,10 +51,9 @@ export const AdminDashboardModal: React.FC<AdminDashboardModalProps> = ({
   const [loading, setLoading] = useState(false);
   const [copiedId, setCopiedId] = useState<string | null>(null);
 
-  // 1. 新增/编辑学员表单状态
+  // 1. 新增/编辑学员表单状态（无需密码/暗号，后台自动生成唯一标识）
   const [editingStudentId, setEditingStudentId] = useState<string | null>(null);
   const [stuName, setStuName] = useState('');
-  const [stuPasscode, setStuPasscode] = useState('');
   const [stuHours, setStuHours] = useState('16');
   const [stuAvatarSeed, setStuAvatarSeed] = useState('Felix');
 
@@ -93,16 +90,10 @@ export const AdminDashboardModal: React.FC<AdminDashboardModalProps> = ({
 
   if (!isOpen) return null;
 
-  // 自动生成拼音/随机暗号
-  const generateRandomPasscode = () => {
-    const num = Math.floor(1000 + Math.random() * 9000);
-    setStuPasscode(`ART${num}`);
-  };
-
-  // 保存学员（新增或更新）
+  // 保存学员（新增或更新，自动生成数据库所需的唯一 passcode 字段，前端无需任何密码）
   const handleSaveStudent = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!stuName.trim() || !stuPasscode.trim()) return alert('请填写学员姓名和专属暗号');
+    if (!stuName.trim()) return alert('请填写学员姓名');
     setLoading(true);
     const avatarUrl = `https://api.dicebear.com/7.x/adventurer/svg?seed=${encodeURIComponent(stuAvatarSeed)}`;
 
@@ -112,16 +103,16 @@ export const AdminDashboardModal: React.FC<AdminDashboardModalProps> = ({
           .from('students')
           .update({
             name: stuName.trim(),
-            passcode: stuPasscode.trim().toUpperCase(),
             remaining_hours: Number(stuHours) || 0,
             avatar_url: avatarUrl,
           })
           .eq('id', editingStudentId);
         if (error) throw error;
       } else {
+        const autoCode = `STU${Date.now().toString().slice(-6)}`;
         const { error } = await supabase.from('students').insert({
           name: stuName.trim(),
-          passcode: stuPasscode.trim().toUpperCase(),
+          passcode: autoCode,
           remaining_hours: Number(stuHours) || 0,
           avatar_url: avatarUrl,
         });
@@ -130,7 +121,6 @@ export const AdminDashboardModal: React.FC<AdminDashboardModalProps> = ({
 
       setEditingStudentId(null);
       setStuName('');
-      setStuPasscode('');
       setStuHours('16');
       onDataChanged();
     } catch (err: any) {
@@ -162,10 +152,10 @@ export const AdminDashboardModal: React.FC<AdminDashboardModalProps> = ({
     else onDataChanged();
   };
 
-  // 复制家长微信通知文案
+  // 复制家长微信通知文案（免密直接打开）
   const handleCopyInvite = (stu: Student) => {
     const siteUrl = window.location.origin + window.location.pathname;
-    const text = `🎨【光影少儿美育画廊】\n${stu.name}家长您好！孩子的专属成长画册已更新✨\n👉 点击访问：${siteUrl}\n🔑 专属家庭暗号：${stu.passcode}\n（输入暗号即可查看孩子全部课堂画作、老师点评与剩余课时）`;
+    const text = `🎨【光影少儿美育画廊】\n${stu.name}家长您好！孩子的课堂画作与老师点评已更新✨\n👉 点击直接查看（无需密码）：${siteUrl}\n欢迎在画作下方为孩子写下鼓励留言～`;
     navigator.clipboard.writeText(text);
     setCopiedId(stu.id);
     setTimeout(() => setCopiedId(null), 2000);
@@ -268,7 +258,7 @@ export const AdminDashboardModal: React.FC<AdminDashboardModalProps> = ({
           <div>
             <h2 className="text-sm font-bold text-stone-900">画室教务与画廊后台管理中心</h2>
             <p className="text-[11px] text-stone-400">
-              学员课时 · 专属暗号 · 教学周次 · 作品库管理
+              学员课时 · 教学周次 · 作品库 · 评论管理
             </p>
           </div>
         </div>
@@ -378,7 +368,6 @@ export const AdminDashboardModal: React.FC<AdminDashboardModalProps> = ({
                       onClick={() => {
                         setEditingStudentId(null);
                         setStuName('');
-                        setStuPasscode('');
                       }}
                       className="text-[11px] text-stone-400 underline"
                     >
@@ -387,7 +376,7 @@ export const AdminDashboardModal: React.FC<AdminDashboardModalProps> = ({
                   )}
                 </div>
 
-                <div className="grid grid-cols-1 gap-2.5 sm:grid-cols-3">
+                <div className="grid grid-cols-1 gap-2.5 sm:grid-cols-2">
                   <input
                     type="text"
                     required
@@ -396,23 +385,6 @@ export const AdminDashboardModal: React.FC<AdminDashboardModalProps> = ({
                     placeholder="学员姓名（如：奔奔）"
                     className="rounded-xl border border-stone-200 px-3 py-2 text-xs"
                   />
-                  <div className="flex gap-1.5">
-                    <input
-                      type="text"
-                      required
-                      value={stuPasscode}
-                      onChange={(e) => setStuPasscode(e.target.value.toUpperCase())}
-                      placeholder="专属暗号（如 BEN2026）"
-                      className="flex-1 rounded-xl border border-stone-200 px-3 py-2 text-xs uppercase font-semibold"
-                    />
-                    <button
-                      type="button"
-                      onClick={generateRandomPasscode}
-                      className="shrink-0 rounded-xl bg-amber-50 px-2.5 text-[11px] font-medium text-amber-700 border border-amber-200"
-                    >
-                      随机生成
-                    </button>
-                  </div>
                   <div className="flex items-center gap-2">
                     <span className="text-xs text-stone-500 shrink-0">剩余课时:</span>
                     <input
@@ -470,12 +442,7 @@ export const AdminDashboardModal: React.FC<AdminDashboardModalProps> = ({
                         className="h-11 w-11 rounded-2xl bg-amber-50 border border-amber-100"
                       />
                       <div>
-                        <div className="flex items-center gap-2">
-                          <span className="text-sm font-bold text-stone-800">{stu.name}</span>
-                          <span className="rounded-md bg-amber-50 px-2 py-0.5 text-[11px] font-mono font-bold text-amber-700 border border-amber-200">
-                            暗号: {stu.passcode}
-                          </span>
-                        </div>
+                        <span className="text-sm font-bold text-stone-800">{stu.name}</span>
                         <p className="text-[11px] text-stone-400 mt-0.5">
                           剩余课时：<strong className="text-stone-700">{stu.remaining_hours}</strong> 节
                         </p>
@@ -513,12 +480,12 @@ export const AdminDashboardModal: React.FC<AdminDashboardModalProps> = ({
                           {copiedId === stu.id ? (
                             <>
                               <Check className="h-3 w-3 text-emerald-600" />
-                              <span className="text-emerald-600">已复制通知</span>
+                              <span className="text-emerald-600">已复制分享</span>
                             </>
                           ) : (
                             <>
                               <Copy className="h-3 w-3" />
-                              <span>复制家长通知</span>
+                              <span>复制分享通知</span>
                             </>
                           )}
                         </button>
@@ -526,7 +493,6 @@ export const AdminDashboardModal: React.FC<AdminDashboardModalProps> = ({
                           onClick={() => {
                             setEditingStudentId(stu.id);
                             setStuName(stu.name);
-                            setStuPasscode(stu.passcode);
                             setStuHours(String(stu.remaining_hours));
                           }}
                           className="rounded-lg bg-stone-100 p-1.5 text-stone-600"
