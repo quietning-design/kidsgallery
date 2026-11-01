@@ -4,13 +4,14 @@ import {
   LayoutGrid,
   MessageCircle,
   Camera,
-  KeyRound,
   LogOut,
   ShieldCheck,
   Calendar,
   Settings,
   Pin,
   Sparkles,
+  UserCheck,
+  Edit2,
 } from 'lucide-react';
 import {
   supabase,
@@ -23,11 +24,13 @@ import {
   DEMO_WEEKS,
   DEMO_ARTWORKS,
 } from './lib/supabase';
-import { PasscodeModal } from './components/PasscodeModal';
 import { TeacherUploadModal } from './components/TeacherUploadModal';
 import { CommentDrawer } from './components/CommentDrawer';
 import { ArtworkLightbox } from './components/ArtworkLightbox';
 import { AdminDashboardModal } from './components/AdminDashboardModal';
+
+const STORAGE_NAME_KEY = 'gallery_parent_nickname';
+const STORAGE_STUDENT_ID_KEY = 'gallery_selected_student_id';
 
 export default function App() {
   const [activeTab, setActiveTab] = useState<'timeline' | 'weekly'>('timeline');
@@ -36,8 +39,12 @@ export default function App() {
   const [artworks, setArtworks] = useState<Artwork[]>(DEMO_ARTWORKS);
   const [currentStudent, setCurrentStudent] = useState<Student | null>(DEMO_STUDENTS[0]);
 
-  // 弹窗控制状态
-  const [showPasscodeModal, setShowPasscodeModal] = useState(false);
+  // 记住的评论人昵称状态（顶部展示与修改）
+  const [savedNickname, setSavedNickname] = useState(
+    () => localStorage.getItem(STORAGE_NAME_KEY) || ''
+  );
+
+  // 弹窗控制状态（仅保留老师后台与拍照上传、评论抽屉、高清灯箱，全员免密直接访问）
   const [showUploadModal, setShowUploadModal] = useState(false);
   const [showAdminDashboard, setShowAdminDashboard] = useState(false);
   const [pendingOpenAdmin, setPendingOpenAdmin] = useState(false);
@@ -59,17 +66,15 @@ export default function App() {
   const [teacherPassword, setTeacherPassword] = useState('');
   const [isTeacherAuthenticated, setIsTeacherAuthenticated] = useState(false);
 
-  // 加载核心数据（包含每个画作关联的 comments 评论列表）
+  // 加载核心数据（全员免密直接读取）
   const loadGalleryData = async () => {
+    setSavedNickname(localStorage.getItem(STORAGE_NAME_KEY) || '');
+
     if (!isSupabaseConfigured) {
-      const savedPasscode = localStorage.getItem('gallery_passcode');
-      if (savedPasscode) {
-        const matched = DEMO_STUDENTS.find(
-          (s) => s.passcode.toUpperCase() === savedPasscode.toUpperCase()
-        );
+      const lastStuId = localStorage.getItem(STORAGE_STUDENT_ID_KEY);
+      if (lastStuId) {
+        const matched = DEMO_STUDENTS.find((s) => s.id === lastStuId);
         if (matched) setCurrentStudent(matched);
-      } else {
-        setShowPasscodeModal(true);
       }
       return;
     }
@@ -87,18 +92,9 @@ export default function App() {
 
     if (stuData && stuData.length > 0) {
       setStudents(stuData);
-      const savedPasscode = localStorage.getItem('gallery_passcode');
-      if (savedPasscode) {
-        const matched = stuData.find(
-          (s) => s.passcode.toUpperCase() === savedPasscode.toUpperCase()
-        );
-        if (matched) setCurrentStudent(matched);
-      } else {
-        setCurrentStudent((prev) => prev || stuData[0]);
-        if (!localStorage.getItem('gallery_guest_dismissed')) {
-          setShowPasscodeModal(true);
-        }
-      }
+      const lastStuId = localStorage.getItem(STORAGE_STUDENT_ID_KEY);
+      const matched = lastStuId ? stuData.find((s) => s.id === lastStuId) : null;
+      setCurrentStudent((prev) => matched || prev || stuData[0]);
     }
     if (weekData && weekData.length > 0) setWeeks(weekData);
     if (artData) setArtworks(artData as Artwork[]);
@@ -145,6 +141,21 @@ export default function App() {
       supabase.removeChannel(commentsChannel);
     };
   }, []);
+
+  // 选择查看的孩子（自动记忆上次浏览的孩子）
+  const handleSelectStudent = (stu: Student) => {
+    setCurrentStudent(stu);
+    localStorage.setItem(STORAGE_STUDENT_ID_KEY, stu.id);
+  };
+
+  // 修改已记住的评论人昵称
+  const handleQuickEditNickname = () => {
+    const next = window.prompt('请输入您的评论称呼（如：奔奔妈妈）：', savedNickname);
+    if (next && next.trim()) {
+      localStorage.setItem(STORAGE_NAME_KEY, next.trim());
+      setSavedNickname(next.trim());
+    }
+  };
 
   // 当前选中孩子的作品列表（按时间倒序）
   const studentArtworks = useMemo(() => {
@@ -193,7 +204,7 @@ export default function App() {
 
   return (
     <div className="min-h-screen bg-[#FAF7F2] text-stone-800 pb-24 max-w-md mx-auto shadow-xl relative">
-      {/* 顶部品牌导航栏 */}
+      {/* 顶部品牌导航栏（无需任何登录密码，直接显示已记住的评论人身份） */}
       <header className="sticky top-0 z-30 flex items-center justify-between bg-[#FAF7F2]/90 px-4 py-3.5 backdrop-blur-md border-b border-stone-200/60">
         <div className="flex items-center gap-2">
           <div className="flex h-8 w-8 items-center justify-center rounded-xl bg-amber-500 text-white font-bold shadow-sm">
@@ -207,13 +218,24 @@ export default function App() {
           </div>
         </div>
 
-        <button
-          onClick={() => setShowPasscodeModal(true)}
-          className="flex items-center gap-1 rounded-full border border-amber-200 bg-amber-50 px-3 py-1.5 text-xs font-medium text-amber-800 active:scale-95"
-        >
-          <KeyRound className="h-3.5 w-3.5 text-amber-600" />
-          <span>{currentStudent ? `${currentStudent.name}的暗号` : '输入家庭暗号'}</span>
-        </button>
+        {savedNickname ? (
+          <button
+            onClick={handleQuickEditNickname}
+            className="flex items-center gap-1 rounded-full border border-emerald-200 bg-emerald-50/80 px-2.5 py-1 text-[11px] font-medium text-emerald-800 active:scale-95"
+          >
+            <UserCheck className="h-3 w-3 text-emerald-600" />
+            <span>{savedNickname}</span>
+            <Edit2 className="h-2.5 w-2.5 text-emerald-500 ml-0.5" />
+          </button>
+        ) : (
+          <button
+            onClick={handleQuickEditNickname}
+            className="flex items-center gap-1 rounded-full border border-stone-200 bg-white px-2.5 py-1 text-[11px] font-medium text-stone-600 active:scale-95"
+          >
+            <Edit2 className="h-3 w-3 text-amber-500" />
+            <span>设置评论称呼</span>
+          </button>
+        )}
       </header>
 
       {/* 双轴切换 Segmented Tab */}
@@ -247,15 +269,15 @@ export default function App() {
       {/* ==================== Tab 1: 个人时光机 ==================== */}
       {activeTab === 'timeline' && (
         <main className="px-4 pt-4 space-y-4">
-          {/* 孩子切换栏 */}
+          {/* 孩子切换栏（免密直接点击任意孩子查看） */}
           <div className="flex gap-2 overflow-x-auto pb-1 no-scrollbar">
             {students.map((stu) => (
               <button
                 key={stu.id}
-                onClick={() => setCurrentStudent(stu)}
-                className={`flex items-center gap-1.5 shrink-0 rounded-full px-3 py-1 text-xs font-medium border transition ${
+                onClick={() => handleSelectStudent(stu)}
+                className={`flex items-center gap-1.5 shrink-0 rounded-full px-3.5 py-1.5 text-xs font-medium border transition ${
                   currentStudent?.id === stu.id
-                    ? 'border-stone-800 bg-stone-800 text-white'
+                    ? 'border-stone-800 bg-stone-800 text-white shadow-sm'
                     : 'border-stone-200 bg-white text-stone-600'
                 }`}
               >
@@ -282,7 +304,7 @@ export default function App() {
                     </span>
                   </div>
                   <p className="text-xs text-amber-50 mt-0.5">
-                    专属暗号：{currentStudent.passcode}
+                    每一次落笔，都是闪闪发光的童年印记
                   </p>
                 </div>
               </div>
@@ -296,10 +318,19 @@ export default function App() {
                   <p className="text-lg font-extrabold">{weeks.length}</p>
                   <p className="text-[10px] text-amber-100">点亮主题(周)</p>
                 </div>
-                <div>
-                  <p className="text-lg font-extrabold">{currentStudent.remaining_hours}</p>
-                  <p className="text-[10px] text-amber-100">剩余课时(节)</p>
-                </div>
+                {isTeacherAuthenticated ? (
+                  <div>
+                    <p className="text-lg font-extrabold">{currentStudent.remaining_hours}</p>
+                    <p className="text-[10px] text-amber-100">剩余课时(老师可见)</p>
+                  </div>
+                ) : (
+                  <div>
+                    <p className="text-lg font-extrabold">
+                      {studentArtworks.reduce((sum, a) => sum + (a.comments?.length || 0), 0)}
+                    </p>
+                    <p className="text-[10px] text-amber-100">收获鼓励(条)</p>
+                  </div>
+                )}
               </div>
             </div>
           )}
@@ -533,7 +564,7 @@ export default function App() {
         </main>
       )}
 
-      {/* 底部老师后台管理与工作台入口 */}
+      {/* 底部老师后台管理与工作台入口（唯一保留的登录入口） */}
       <footer className="mt-12 py-6 text-center text-[11px] text-stone-400">
         {isTeacherAuthenticated ? (
           <div className="inline-flex items-center gap-3 rounded-full bg-emerald-50 px-4 py-1.5 text-emerald-700 border border-emerald-200">
@@ -643,20 +674,6 @@ export default function App() {
       )}
 
       {/* 弹窗与抽屉挂载 */}
-      <PasscodeModal
-        isOpen={showPasscodeModal}
-        students={students}
-        onSelectStudent={(stu) => {
-          setCurrentStudent(stu);
-          setActiveTab('timeline');
-          setShowPasscodeModal(false);
-        }}
-        onDismissAsGuest={() => {
-          localStorage.setItem('gallery_guest_dismissed', '1');
-          setShowPasscodeModal(false);
-        }}
-      />
-
       <TeacherUploadModal
         isOpen={showUploadModal}
         onClose={() => setShowUploadModal(false)}
