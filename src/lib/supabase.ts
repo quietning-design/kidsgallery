@@ -45,6 +45,7 @@ export interface Artwork {
   created_at: string;
   students?: Pick<Student, 'id' | 'name' | 'avatar_url'>;
   curriculum_weeks?: Pick<CurriculumWeek, 'id' | 'week_code' | 'title' | 'theme_desc'>;
+  comments?: CommentItem[];
 }
 
 export interface CommentItem {
@@ -124,6 +125,24 @@ export const DEMO_ARTWORKS: Artwork[] = [
       title: '向日葵与梵高星空',
       theme_desc: '学习厚涂肌理与冷暖互补色对比，感受生命力与旋转笔触',
     },
+    comments: [
+      {
+        id: 'c-demo-1',
+        artwork_id: 'dddd1111-1111-1111-1111-111111111111',
+        author_name: '奔奔妈妈',
+        author_role: 'parent',
+        content: '宝贝画的向日葵太有活力啦，挂在客厅超好看！🌻',
+        created_at: '2026-10-28T18:10:00Z',
+      },
+      {
+        id: 'c-demo-2',
+        artwork_id: 'dddd1111-1111-1111-1111-111111111111',
+        author_name: '朵朵外婆',
+        author_role: 'parent',
+        content: '颜色真鲜亮，给小画家点赞👍',
+        created_at: '2026-10-28T19:05:00Z',
+      },
+    ],
   },
   {
     id: 'dddd2222-2222-2222-2222-222222222222',
@@ -146,6 +165,24 @@ export const DEMO_ARTWORKS: Artwork[] = [
       title: '向日葵与梵高星空',
       theme_desc: '学习厚涂肌理与冷暖互补色对比，感受生命力与旋转笔触',
     },
+    comments: [
+      {
+        id: 'c-demo-1',
+        artwork_id: 'dddd1111-1111-1111-1111-111111111111',
+        author_name: '奔奔妈妈',
+        author_role: 'parent',
+        content: '宝贝画的向日葵太有活力啦，挂在客厅超好看！🌻',
+        created_at: '2026-10-28T18:10:00Z',
+      },
+      {
+        id: 'c-demo-2',
+        artwork_id: 'dddd1111-1111-1111-1111-111111111111',
+        author_name: '朵朵外婆',
+        author_role: 'parent',
+        content: '颜色真鲜亮，给小画家点赞👍',
+        created_at: '2026-10-28T19:05:00Z',
+      },
+    ],
   },
   {
     id: 'dddd3333-3333-3333-3333-333333333333',
@@ -168,5 +205,23 @@ export const DEMO_ARTWORKS: Artwork[] = [
       title: '向日葵与梵高星空',
       theme_desc: '学习厚涂肌理与冷暖互补色对比，感受生命力与旋转笔触',
     },
+    comments: [
+      {
+        id: 'c-demo-1',
+        artwork_id: 'dddd1111-1111-1111-1111-111111111111',
+        author_name: '奔奔妈妈',
+        author_role: 'parent',
+        content: '宝贝画的向日葵太有活力啦，挂在客厅超好看！🌻',
+        created_at: '2026-10-28T18:10:00Z',
+      },
+      {
+        id: 'c-demo-2',
+        artwork_id: 'dddd1111-1111-1111-1111-111111111111',
+        author_name: '朵朵外婆',
+        author_role: 'parent',
+        content: '颜色真鲜亮，给小画家点赞👍',
+        created_at: '2026-10-28T19:05:00Z',
+      },
+    ],
   },
 ];
