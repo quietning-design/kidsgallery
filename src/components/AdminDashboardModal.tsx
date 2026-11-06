@@ -14,6 +14,7 @@ import {
   BookOpen,
   Camera,
   Save,
+  Star,
 } from 'lucide-react';
 import {
   supabase,
@@ -23,6 +24,11 @@ import {
   Artwork,
   CommentItem,
   StageType,
+  PRESET_CATEGORIES,
+  getArtworkCategory,
+  isArtworkFeatured,
+  getVisibleSkillTags,
+  buildTagsWithMeta,
 } from '../lib/supabase';
 
 interface AdminDashboardModalProps {
@@ -51,7 +57,7 @@ export const AdminDashboardModal: React.FC<AdminDashboardModalProps> = ({
   const [loading, setLoading] = useState(false);
   const [copiedId, setCopiedId] = useState<string | null>(null);
 
-  // 1. 新增/编辑学员表单状态（无需密码/暗号，后台自动生成唯一标识）
+  // 1. 新增/编辑学员表单状态
   const [editingStudentId, setEditingStudentId] = useState<string | null>(null);
   const [stuName, setStuName] = useState('');
   const [stuHours, setStuHours] = useState('16');
@@ -68,6 +74,8 @@ export const AdminDashboardModal: React.FC<AdminDashboardModalProps> = ({
   const [editingArtwork, setEditingArtwork] = useState<Artwork | null>(null);
   const [artTitle, setArtTitle] = useState('');
   const [artStage, setArtStage] = useState<StageType>('最终成作');
+  const [artCategory, setArtCategory] = useState('儿童画');
+  const [artFeatured, setArtFeatured] = useState(false);
   const [artComment, setArtComment] = useState('');
 
   // 4. 评论管理列表
@@ -90,7 +98,7 @@ export const AdminDashboardModal: React.FC<AdminDashboardModalProps> = ({
 
   if (!isOpen) return null;
 
-  // 保存学员（新增或更新，自动生成数据库所需的唯一 passcode 字段，前端无需任何密码）
+  // 保存学员
   const handleSaveStudent = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!stuName.trim()) return alert('请填写学员姓名');
@@ -152,7 +160,7 @@ export const AdminDashboardModal: React.FC<AdminDashboardModalProps> = ({
     else onDataChanged();
   };
 
-  // 复制家长微信通知文案（免密直接打开）
+  // 复制家长微信通知文案
   const handleCopyInvite = (stu: Student) => {
     const siteUrl = window.location.origin + window.location.pathname;
     const text = `🎨【光影少儿美育画廊】\n${stu.name}家长您好！孩子的课堂画作与老师点评已更新✨\n👉 点击直接查看（无需密码）：${siteUrl}\n欢迎在画作下方为孩子写下鼓励留言～`;
@@ -207,18 +215,41 @@ export const AdminDashboardModal: React.FC<AdminDashboardModalProps> = ({
     else onDataChanged();
   };
 
-  // 更新作品点评或阶段
+  // 一键切换作品是否选入首页「光影画廊」
+  const handleToggleFeatured = async (art: Artwork) => {
+    const currentFeatured = isArtworkFeatured(art);
+    const currentCat = getArtworkCategory(art);
+    const skillTags = getVisibleSkillTags(art);
+    const updatedTags = buildTagsWithMeta(skillTags, currentCat, !currentFeatured);
+
+    const { error } = await supabase
+      .from('artworks')
+      .update({ tags: updatedTags })
+      .eq('id', art.id);
+
+    if (error) {
+      alert('设置精选失败：' + error.message);
+    } else {
+      onDataChanged();
+    }
+  };
+
+  // 更新作品点评、分类或阶段
   const handleUpdateArtwork = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!editingArtwork) return;
     setLoading(true);
     try {
+      const skillTags = getVisibleSkillTags(editingArtwork);
+      const updatedTags = buildTagsWithMeta(skillTags, artCategory, artFeatured);
+
       const { error } = await supabase
         .from('artworks')
         .update({
           title: artTitle.trim(),
           stage: artStage,
           teacher_comment: artComment.trim(),
+          tags: updatedTags,
         })
         .eq('id', editingArtwork.id);
       if (error) throw error;
@@ -258,7 +289,7 @@ export const AdminDashboardModal: React.FC<AdminDashboardModalProps> = ({
           <div>
             <h2 className="text-sm font-bold text-stone-900">画室教务与画廊后台管理中心</h2>
             <p className="text-[11px] text-stone-400">
-              学员课时 · 教学周次 · 作品库 · 评论管理
+              学员课时 · 教学周次 · 首页精选与分类 · 评论管理
             </p>
           </div>
         </div>
@@ -336,7 +367,7 @@ export const AdminDashboardModal: React.FC<AdminDashboardModalProps> = ({
               }`}
             >
               <ImageIcon className="h-3.5 w-3.5" />
-              <span>作品管理</span>
+              <span>作品/精选</span>
             </button>
             <button
               onClick={() => setActiveSection('comments')}
@@ -352,7 +383,6 @@ export const AdminDashboardModal: React.FC<AdminDashboardModalProps> = ({
           {/* ==================== 模块 1：学员与课时管理 ==================== */}
           {activeSection === 'students' && (
             <div className="space-y-4">
-              {/* 新增/编辑学员表单 */}
               <form
                 onSubmit={handleSaveStudent}
                 className="rounded-3xl bg-white p-4 shadow-sm border border-stone-100 space-y-3"
@@ -397,7 +427,6 @@ export const AdminDashboardModal: React.FC<AdminDashboardModalProps> = ({
                   </div>
                 </div>
 
-                {/* 选择预设头像 */}
                 <div>
                   <label className="block text-[11px] text-stone-400 mb-1.5">选择趣味卡通头像：</label>
                   <div className="flex gap-2 overflow-x-auto pb-1 no-scrollbar">
@@ -428,7 +457,6 @@ export const AdminDashboardModal: React.FC<AdminDashboardModalProps> = ({
                 </button>
               </form>
 
-              {/* 学员列表与快捷消课 */}
               <div className="space-y-2.5">
                 {students.map((stu) => (
                   <div
@@ -449,7 +477,6 @@ export const AdminDashboardModal: React.FC<AdminDashboardModalProps> = ({
                       </div>
                     </div>
 
-                    {/* 快捷消课与操作按钮 */}
                     <div className="flex flex-wrap items-center justify-between gap-2 border-t border-stone-100 pt-2.5 sm:border-0 sm:pt-0">
                       <div className="flex items-center gap-1">
                         <button
@@ -626,7 +653,7 @@ export const AdminDashboardModal: React.FC<AdminDashboardModalProps> = ({
             </div>
           )}
 
-          {/* ==================== 模块 3：作品管理 ==================== */}
+          {/* ==================== 模块 3：作品、分类与光影画廊精选管理 ==================== */}
           {activeSection === 'artworks' && (
             <div className="space-y-4">
               {editingArtwork && (
@@ -653,6 +680,37 @@ export const AdminDashboardModal: React.FC<AdminDashboardModalProps> = ({
                     className="w-full rounded-xl border border-stone-200 bg-white px-3 py-2 text-xs"
                     placeholder="作品名称"
                   />
+
+                  {/* 作品分类编辑（预设快选 + 自定义输入） */}
+                  <div className="space-y-1.5">
+                    <label className="block text-[11px] font-semibold text-stone-600">
+                      作品分类（可直接输入自定义分类）：
+                    </label>
+                    <input
+                      type="text"
+                      value={artCategory}
+                      onChange={(e) => setArtCategory(e.target.value)}
+                      placeholder="如：原创、水彩、素描、儿童画..."
+                      className="w-full rounded-xl border border-stone-200 bg-white px-3 py-2 text-xs font-semibold"
+                    />
+                    <div className="flex flex-wrap gap-1.5">
+                      {PRESET_CATEGORIES.map((c) => (
+                        <button
+                          type="button"
+                          key={c}
+                          onClick={() => setArtCategory(c)}
+                          className={`rounded-full px-2.5 py-0.5 text-[11px] font-medium border ${
+                            artCategory === c
+                              ? 'border-stone-900 bg-stone-900 text-white'
+                              : 'border-stone-200 bg-white text-stone-600'
+                          }`}
+                        >
+                          {c}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+
                   <div className="grid grid-cols-3 gap-1.5 rounded-xl bg-white p-1 border border-stone-200">
                     {STAGES.map((s) => (
                       <button
@@ -667,6 +725,17 @@ export const AdminDashboardModal: React.FC<AdminDashboardModalProps> = ({
                       </button>
                     ))}
                   </div>
+
+                  <label className="flex items-center gap-2 rounded-xl bg-white p-2.5 border border-stone-200 text-xs font-medium text-stone-800 cursor-pointer">
+                    <input
+                      type="checkbox"
+                      checked={artFeatured}
+                      onChange={(e) => setArtFeatured(e.target.checked)}
+                      className="h-4 w-4 accent-amber-500"
+                    />
+                    <span>⭐ 选入首页「光影画廊」精选展示</span>
+                  </label>
+
                   <textarea
                     rows={3}
                     value={artComment}
@@ -685,53 +754,74 @@ export const AdminDashboardModal: React.FC<AdminDashboardModalProps> = ({
               )}
 
               <div className="space-y-2.5">
-                {artworks.map((art) => (
-                  <div
-                    key={art.id}
-                    className="flex items-center gap-3 rounded-2xl bg-white p-3 shadow-sm border border-stone-100"
-                  >
-                    <img
-                      src={art.image_url}
-                      alt={art.title}
-                      className="h-16 w-16 shrink-0 rounded-xl object-cover bg-stone-100"
-                    />
-                    <div className="flex-1 min-w-0">
-                      <div className="flex items-center gap-1.5">
-                        <span className="rounded bg-amber-100 px-1.5 py-0.5 text-[10px] font-semibold text-amber-800">
-                          {art.students?.name || '学员'}
-                        </span>
-                        <span className="rounded bg-stone-100 px-1.5 py-0.5 text-[10px] text-stone-600">
-                          {art.stage}
-                        </span>
+                {artworks.map((art) => {
+                  const featured = isArtworkFeatured(art);
+                  const cat = getArtworkCategory(art);
+                  return (
+                    <div
+                      key={art.id}
+                      className="flex items-center gap-3 rounded-2xl bg-white p-3 shadow-sm border border-stone-100"
+                    >
+                      <img
+                        src={art.image_url}
+                        alt={art.title}
+                        className="h-16 w-16 shrink-0 rounded-xl object-cover bg-stone-100"
+                      />
+                      <div className="flex-1 min-w-0">
+                        <div className="flex flex-wrap items-center gap-1.5">
+                          <span className="rounded bg-amber-100 px-1.5 py-0.5 text-[10px] font-semibold text-amber-800">
+                            {art.students?.name || '学员'}
+                          </span>
+                          <span className="rounded bg-stone-800 px-1.5 py-0.5 text-[10px] font-medium text-white">
+                            {cat}
+                          </span>
+                          <span className="rounded bg-stone-100 px-1.5 py-0.5 text-[10px] text-stone-600">
+                            {art.stage}
+                          </span>
+                        </div>
+                        <h4 className="truncate text-xs font-bold text-stone-800 mt-1">
+                          《{art.title}》
+                        </h4>
+                        <p className="truncate text-[11px] text-stone-400">
+                          {art.teacher_comment || '暂无评语'}
+                        </p>
                       </div>
-                      <h4 className="truncate text-xs font-bold text-stone-800 mt-1">
-                        《{art.title}》
-                      </h4>
-                      <p className="truncate text-[11px] text-stone-400">
-                        {art.teacher_comment || '暂无评语'}
-                      </p>
+                      <div className="flex items-center gap-1.5 shrink-0">
+                        <button
+                          onClick={() => handleToggleFeatured(art)}
+                          title={featured ? '点击移出光影画廊' : '点击选入光影画廊'}
+                          className={`flex items-center gap-1 rounded-lg px-2 py-1.5 text-[11px] font-bold border transition ${
+                            featured
+                              ? 'border-amber-400 bg-amber-50 text-amber-700'
+                              : 'border-stone-200 bg-stone-50 text-stone-400'
+                          }`}
+                        >
+                          <Star className={`h-3.5 w-3.5 ${featured ? 'fill-amber-400 text-amber-500' : ''}`} />
+                          <span>{featured ? '已精选' : '设精选'}</span>
+                        </button>
+                        <button
+                          onClick={() => {
+                            setEditingArtwork(art);
+                            setArtTitle(art.title);
+                            setArtStage(art.stage);
+                            setArtCategory(cat);
+                            setArtFeatured(featured);
+                            setArtComment(art.teacher_comment || '');
+                          }}
+                          className="rounded-lg bg-stone-100 p-2 text-stone-600"
+                        >
+                          <Edit3 className="h-4 w-4" />
+                        </button>
+                        <button
+                          onClick={() => handleDeleteArtwork(art)}
+                          className="rounded-lg bg-rose-50 p-2 text-rose-500"
+                        >
+                          <Trash2 className="h-4 w-4" />
+                        </button>
+                      </div>
                     </div>
-                    <div className="flex items-center gap-1.5 shrink-0">
-                      <button
-                        onClick={() => {
-                          setEditingArtwork(art);
-                          setArtTitle(art.title);
-                          setArtStage(art.stage);
-                          setArtComment(art.teacher_comment || '');
-                        }}
-                        className="rounded-lg bg-stone-100 p-2 text-stone-600"
-                      >
-                        <Edit3 className="h-4 w-4" />
-                      </button>
-                      <button
-                        onClick={() => handleDeleteArtwork(art)}
-                        className="rounded-lg bg-rose-50 p-2 text-rose-500"
-                      >
-                        <Trash2 className="h-4 w-4" />
-                      </button>
-                    </div>
-                  </div>
-                ))}
+                  );
+                })}
               </div>
             </div>
           )}
