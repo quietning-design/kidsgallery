@@ -12,6 +12,9 @@ import {
   Sparkles,
   UserCheck,
   Edit2,
+  Star,
+  Award,
+  Palette,
 } from 'lucide-react';
 import {
   supabase,
@@ -20,6 +23,11 @@ import {
   CurriculumWeek,
   Artwork,
   CommentItem,
+  PRESET_CATEGORIES,
+  getArtworkCategory,
+  isArtworkFeatured,
+  getVisibleSkillTags,
+  buildTagsWithMeta,
   DEMO_STUDENTS,
   DEMO_WEEKS,
   DEMO_ARTWORKS,
@@ -33,7 +41,10 @@ const STORAGE_NAME_KEY = 'gallery_parent_nickname';
 const STORAGE_STUDENT_ID_KEY = 'gallery_selected_student_id';
 
 export default function App() {
-  const [activeTab, setActiveTab] = useState<'timeline' | 'weekly'>('timeline');
+  // 默认首页为「光影画廊」(gallery)，包含：光影画廊 | 个人时光机 | 课堂展厅
+  const [activeTab, setActiveTab] = useState<'gallery' | 'timeline' | 'classroom'>('gallery');
+  const [selectedCategory, setSelectedCategory] = useState<string>('全部');
+
   const [students, setStudents] = useState<Student[]>(DEMO_STUDENTS);
   const [weeks, setWeeks] = useState<CurriculumWeek[]>(DEMO_WEEKS);
   const [artworks, setArtworks] = useState<Artwork[]>(DEMO_ARTWORKS);
@@ -124,23 +135,71 @@ export default function App() {
       setIsTeacherAuthenticated(!!session);
     });
 
-    // 全局实时监听新评论或删除评论，让个人时光机卡片下方的评论流实时更新
-    const commentsChannel = supabase
-      .channel('timeline-comments-sync')
+    // 全局实时监听评论与作品变动
+    const realtimeChannel = supabase
+      .channel('gallery-realtime-sync')
       .on(
         'postgres_changes',
         { event: '*', schema: 'public', table: 'comments' },
-        () => {
-          loadGalleryData();
-        }
+        () => loadGalleryData()
+      )
+      .on(
+        'postgres_changes',
+        { event: '*', schema: 'public', table: 'artworks' },
+        () => loadGalleryData()
       )
       .subscribe();
 
     return () => {
       authListener.subscription.unsubscribe();
-      supabase.removeChannel(commentsChannel);
+      supabase.removeChannel(realtimeChannel);
     };
   }, []);
+
+  // 动态汇总所有作品分类（包含预设分类 + 老师上传时自定义的分类）
+  const allCategories = useMemo(() => {
+    const dynamicCats = artworks.map((a) => getArtworkCategory(a)).filter(Boolean);
+    return Array.from(new Set([...PRESET_CATEGORIES.slice(0, 4), ...dynamicCats]));
+  }, [artworks]);
+
+  // 首页【光影画廊】精选作品列表（优先展示老师标记为精选的作品；若暂未手动标记，则智能展示最终成作或全部作品）
+  const featuredGalleryArtworks = useMemo(() => {
+    const explicitlyFeatured = artworks.filter((a) => isArtworkFeatured(a));
+    const baseList =
+      explicitlyFeatured.length > 0
+        ? explicitlyFeatured
+        : artworks.filter((a) => a.stage === '最终成作').length > 0
+        ? artworks.filter((a) => a.stage === '最终成作')
+        : artworks;
+
+    if (selectedCategory === '全部') return baseList;
+    return baseList.filter((a) => getArtworkCategory(a) === selectedCategory);
+  }, [artworks, selectedCategory]);
+
+  // 老师一键在画廊/课堂展厅切换某幅作品是否选入【光影画廊】
+  const handleQuickToggleFeatured = async (e: React.MouseEvent, art: Artwork) => {
+    e.stopPropagation();
+    const nextFeatured = !isArtworkFeatured(art);
+    const cat = getArtworkCategory(art);
+    const skills = getVisibleSkillTags(art);
+    const updatedTags = buildTagsWithMeta(skills, cat, nextFeatured);
+
+    // 乐观更新本地状态
+    setArtworks((prev) =>
+      prev.map((item) => (item.id === art.id ? { ...item, tags: updatedTags } : item))
+    );
+
+    if (!isSupabaseConfigured) return;
+
+    const { error } = await supabase
+      .from('artworks')
+      .update({ tags: updatedTags })
+      .eq('id', art.id);
+    if (error) {
+      alert('更新精选状态失败：' + error.message);
+      loadGalleryData();
+    }
+  };
 
   // 选择查看的孩子（自动记忆上次浏览的孩子）
   const handleSelectStudent = (stu: Student) => {
@@ -203,7 +262,7 @@ export default function App() {
   };
 
   return (
-    <div className="min-h-screen bg-[#FAF7F2] text-stone-800 pb-24 max-w-md mx-auto shadow-xl relative">
+    <div className="min-h-screen bg-[#FAF7F2] text-stone-800 pb-28 max-w-md mx-auto shadow-xl relative">
       {/* 顶部品牌导航栏（无需任何登录密码，直接显示已记住的评论人身份） */}
       <header className="sticky top-0 z-30 flex items-center justify-between bg-[#FAF7F2]/90 px-4 py-3.5 backdrop-blur-md border-b border-stone-200/60">
         <div className="flex items-center gap-2">
@@ -238,35 +297,177 @@ export default function App() {
         )}
       </header>
 
-      {/* 双轴切换 Segmented Tab */}
-      <div className="px-4 pt-3">
-        <div className="grid grid-cols-2 rounded-2xl bg-stone-200/70 p-1">
-          <button
-            onClick={() => setActiveTab('timeline')}
-            className={`flex items-center justify-center gap-1.5 rounded-xl py-2 text-xs font-bold transition ${
-              activeTab === 'timeline'
-                ? 'bg-white text-stone-900 shadow-sm'
-                : 'text-stone-500'
-            }`}
-          >
-            <Clock className="h-3.5 w-3.5 text-amber-500" />
-            <span>个人时光机</span>
-          </button>
-          <button
-            onClick={() => setActiveTab('weekly')}
-            className={`flex items-center justify-center gap-1.5 rounded-xl py-2 text-xs font-bold transition ${
-              activeTab === 'weekly'
-                ? 'bg-white text-stone-900 shadow-sm'
-                : 'text-stone-500'
-            }`}
-          >
-            <LayoutGrid className="h-3.5 w-3.5 text-amber-500" />
-            <span>每周大展厅</span>
-          </button>
-        </div>
-      </div>
+      {/* ==================== Tab 1: 光影画廊（精选首页） ==================== */}
+      {activeTab === 'gallery' && (
+        <main className="px-4 pt-4 space-y-4">
+          {/* 光影画廊封面横幅 */}
+          <div className="relative overflow-hidden rounded-3xl bg-gradient-to-br from-stone-900 via-stone-800 to-amber-900 p-5 text-white shadow-lg">
+            <div className="relative z-10 space-y-1.5">
+              <div className="inline-flex items-center gap-1 rounded-full bg-amber-400/20 border border-amber-300/30 px-2.5 py-0.5 text-[10px] font-semibold text-amber-300">
+                <Sparkles className="h-3 w-3" />
+                <span>精选艺术展厅 · CURATED GALLERY</span>
+              </div>
+              <h2 className="text-lg font-extrabold tracking-tight">
+                光影少儿精选作品展
+              </h2>
+              <p className="text-xs text-stone-300 leading-relaxed">
+                甄选课堂展厅中充满想象力与表现力的代表画作，点击画作可欣赏高清细节
+              </p>
+            </div>
+            <Award className=" -right-3 -bottom-3 absolute h-28 w-28 text-white/5 rotate-12" />
+          </div>
 
-      {/* ==================== Tab 1: 个人时光机 ==================== */}
+          {/* 作品分类横向筛选胶囊（全部 / 原创 / 水彩 / 素描 / 儿童画 / 自定义...） */}
+          <div className="flex items-center gap-2 overflow-x-auto pb-1 no-scrollbar">
+            {['全部', ...allCategories].map((cat) => (
+              <button
+                key={cat}
+                onClick={() => setSelectedCategory(cat)}
+                className={`shrink-0 rounded-full px-3.5 py-1.5 text-xs font-bold border transition ${
+                  selectedCategory === cat
+                    ? 'border-amber-500 bg-amber-500 text-white shadow-sm'
+                    : 'border-stone-200 bg-white text-stone-600'
+                }`}
+              >
+                {cat}
+              </button>
+            ))}
+          </div>
+
+          {/* 精选作品卡片流 */}
+          {featuredGalleryArtworks.length === 0 ? (
+            <div className="rounded-3xl bg-white p-10 text-center text-xs text-stone-400 border border-stone-100">
+              当前分类【{selectedCategory}】暂无精选展品，试试切换其他分类吧～
+            </div>
+          ) : (
+            <div className="space-y-4">
+              {featuredGalleryArtworks.map((art) => {
+                const category = getArtworkCategory(art);
+                const skillTags = getVisibleSkillTags(art);
+                const featured = isArtworkFeatured(art);
+
+                return (
+                  <article
+                    key={art.id}
+                    className="overflow-hidden rounded-3xl bg-white shadow-sm border border-stone-100"
+                  >
+                    {/* 画作大图 */}
+                    <div
+                      onClick={() => setLightboxArtwork(art)}
+                      className="relative cursor-pointer overflow-hidden bg-stone-100"
+                    >
+                      <img
+                        src={art.image_url}
+                        alt={art.title}
+                        loading="lazy"
+                        className="max-h-80 w-full object-cover transition duration-300 active:scale-105"
+                      />
+                      {/* 左上角：作品分类与精选标识 */}
+                      <div className="absolute left-3 top-3 flex items-center gap-1.5">
+                        <span className="rounded-full bg-amber-500/95 px-2.5 py-1 text-[10px] font-bold text-white shadow-sm backdrop-blur-sm">
+                          {category}
+                        </span>
+                        <span className="rounded-full bg-black/60 px-2.5 py-1 text-[10px] font-medium text-amber-200 backdrop-blur-sm">
+                          {art.stage}
+                        </span>
+                      </div>
+
+                      {/* 老师登录时：右上角一键移出/加入精选 */}
+                      {isTeacherAuthenticated && (
+                        <button
+                          onClick={(e) => handleQuickToggleFeatured(e, art)}
+                          className={`absolute right-3 top-3 flex items-center gap-1 rounded-full px-2.5 py-1 text-[10px] font-bold shadow-md backdrop-blur-sm ${
+                            featured
+                              ? 'bg-amber-400 text-stone-900'
+                              : 'bg-black/60 text-white'
+                          }`}
+                        >
+                          <Star className={`h-3 w-3 ${featured ? 'fill-stone-900' : ''}`} />
+                          <span>{featured ? '画廊精选' : '设为精选'}</span>
+                        </button>
+                      )}
+                    </div>
+
+                    {/* 作品信息与作者 */}
+                    <div className="p-4 space-y-2.5">
+                      <div className="flex items-center justify-between">
+                        <div>
+                          <h3 className="text-sm font-bold text-stone-900">《{art.title}》</h3>
+                          <p className="text-[11px] text-stone-400">
+                            {art.curriculum_weeks?.week_code} · {art.curriculum_weeks?.title}
+                          </p>
+                        </div>
+
+                        {/* 点击小画家头像可直达他的个人时光机 */}
+                        {art.students && (
+                          <button
+                            onClick={() => {
+                              const found = students.find((s) => s.id === art.student_id);
+                              if (found) {
+                                handleSelectStudent(found);
+                                setActiveTab('timeline');
+                              }
+                            }}
+                            className="flex items-center gap-1.5 rounded-full bg-stone-100 pl-1.5 pr-2.5 py-1 text-xs font-medium text-stone-700 active:scale-95"
+                          >
+                            <img
+                              src={art.students.avatar_url}
+                              alt={art.students.name}
+                              className="h-5 w-5 rounded-full bg-white"
+                            />
+                            <span>{art.students.name}</span>
+                          </button>
+                        )}
+                      </div>
+
+                      {skillTags.length > 0 && (
+                        <div className="flex flex-wrap gap-1.5">
+                          {skillTags.map((t) => (
+                            <span
+                              key={t}
+                              className="rounded-full bg-amber-50 px-2.5 py-0.5 text-[10px] font-medium text-amber-700"
+                            >
+                              #{t}
+                            </span>
+                          ))}
+                        </div>
+                      )}
+
+                      {art.teacher_comment && (
+                        <div className="rounded-2xl bg-amber-50/70 p-3 text-xs text-stone-700 leading-relaxed border border-amber-200/60">
+                          <span className="font-bold text-amber-900">指导老师点评：</span>
+                          {art.teacher_comment}
+                        </div>
+                      )}
+
+                      <div className="flex items-center justify-between pt-1">
+                        <button
+                          onClick={() => setLightboxArtwork(art)}
+                          className="text-[11px] font-medium text-amber-600"
+                        >
+                          查看高清细节 →
+                        </button>
+                        <button
+                          onClick={() => setActiveCommentArtwork(art)}
+                          className="flex items-center gap-1.5 rounded-full bg-stone-100 px-3 py-1.5 text-xs font-medium text-stone-700 active:scale-95"
+                        >
+                          <MessageCircle className="h-3.5 w-3.5 text-amber-500" />
+                          <span>
+                            送鼓励
+                            {(art.comments?.length || 0) > 0 ? ` (${art.comments?.length})` : ''}
+                          </span>
+                        </button>
+                      </div>
+                    </div>
+                  </article>
+                );
+              })}
+            </div>
+          )}
+        </main>
+      )}
+
+      {/* ==================== Tab 2: 个人时光机 ==================== */}
       {activeTab === 'timeline' && (
         <main className="px-4 pt-4 space-y-4">
           {/* 孩子切换栏（免密直接点击任意孩子查看） */}
@@ -287,7 +488,7 @@ export default function App() {
             ))}
           </div>
 
-          {/* 孩子成长档案头部卡片 */}
+          {/* 孩子成长档案头部卡片（剩余课时仅老师可见） */}
           {currentStudent && (
             <div className="rounded-3xl bg-gradient-to-br from-amber-500 to-orange-400 p-5 text-white shadow-lg shadow-amber-500/15">
               <div className="flex items-center gap-3.5">
@@ -338,7 +539,8 @@ export default function App() {
           {/* 时间轴作品卡片流 */}
           <div className="relative space-y-5 before:absolute before:left-3 before:top-3 before:bottom-3 before:w-0.5 before:bg-amber-200">
             {studentArtworks.map((art) => {
-              // 拆分并排序评论：老师追加点评置顶在前，家长/匿名访客评论按时间排列在后
+              const category = getArtworkCategory(art);
+              const skillTags = getVisibleSkillTags(art);
               const rawComments: CommentItem[] = art.comments || [];
               const teacherExtraComments = rawComments
                 .filter((c) => c.author_role === 'teacher')
@@ -364,9 +566,14 @@ export default function App() {
                         loading="lazy"
                         className="max-h-80 w-full object-cover transition duration-300 active:scale-105"
                       />
-                      <span className="absolute left-3 top-3 rounded-full bg-black/60 px-2.5 py-1 text-[10px] font-medium text-amber-300 backdrop-blur-sm">
-                        {art.stage}
-                      </span>
+                      <div className="absolute left-3 top-3 flex items-center gap-1.5">
+                        <span className="rounded-full bg-amber-500 px-2.5 py-1 text-[10px] font-bold text-white shadow-sm">
+                          {category}
+                        </span>
+                        <span className="rounded-full bg-black/60 px-2.5 py-1 text-[10px] font-medium text-amber-300 backdrop-blur-sm">
+                          {art.stage}
+                        </span>
+                      </div>
                     </div>
 
                     {/* 作品详情、置顶老师点评与直接展开的家长评论区 */}
@@ -384,9 +591,9 @@ export default function App() {
                       </div>
 
                       {/* 能力标签 */}
-                      {art.tags?.length > 0 && (
+                      {skillTags.length > 0 && (
                         <div className="flex flex-wrap gap-1.5">
-                          {art.tags.map((t) => (
+                          {skillTags.map((t) => (
                             <span
                               key={t}
                               className="rounded-full bg-amber-50 px-2.5 py-0.5 text-[10px] font-medium text-amber-700"
@@ -488,11 +695,34 @@ export default function App() {
         </main>
       )}
 
-      {/* ==================== Tab 2: 每周大展厅 ==================== */}
-      {activeTab === 'weekly' && (
-        <main className="px-4 pt-4 space-y-6">
+      {/* ==================== Tab 3: 课堂展厅 ==================== */}
+      {activeTab === 'classroom' && (
+        <main className="px-4 pt-4 space-y-5">
+          {/* 课堂展厅分类筛选条 */}
+          <div className="flex items-center gap-2 overflow-x-auto pb-1 no-scrollbar">
+            {['全部', ...allCategories].map((cat) => (
+              <button
+                key={cat}
+                onClick={() => setSelectedCategory(cat)}
+                className={`shrink-0 rounded-full px-3.5 py-1.5 text-xs font-bold border transition ${
+                  selectedCategory === cat
+                    ? 'border-stone-900 bg-stone-900 text-white shadow-sm'
+                    : 'border-stone-200 bg-white text-stone-600'
+                }`}
+              >
+                {cat}
+              </button>
+            ))}
+          </div>
+
           {weeks.map((week) => {
-            const weekActs = artworks.filter((a) => a.week_id === week.id);
+            const weekActs = artworks.filter(
+              (a) =>
+                a.week_id === week.id &&
+                (selectedCategory === '全部' || getArtworkCategory(a) === selectedCategory)
+            );
+            if (weekActs.length === 0) return null;
+
             return (
               <section
                 key={week.id}
@@ -501,7 +731,7 @@ export default function App() {
                 <div className="border-b border-stone-100 pb-3">
                   <div className="flex items-center gap-1.5 text-amber-600 text-xs font-bold">
                     <Calendar className="h-3.5 w-3.5" />
-                    <span>{week.week_code} 主题展</span>
+                    <span>{week.week_code} 课堂展厅</span>
                   </div>
                   <h2 className="text-base font-bold text-stone-800 mt-0.5">{week.title}</h2>
                   <p className="text-xs text-stone-500 mt-1">{week.theme_desc}</p>
@@ -509,54 +739,79 @@ export default function App() {
 
                 {/* 双列网格展示全班同题创作集 */}
                 <div className="grid grid-cols-2 gap-3">
-                  {weekActs.map((art) => (
-                    <div
-                      key={art.id}
-                      className="group overflow-hidden rounded-2xl border border-stone-100 bg-stone-50/60 flex flex-col justify-between"
-                    >
-                      <div
-                        onClick={() => setLightboxArtwork(art)}
-                        className="relative aspect-square overflow-hidden bg-stone-200 cursor-pointer"
-                      >
-                        <img
-                          src={art.image_url}
-                          alt={art.title}
-                          loading="lazy"
-                          className="h-full w-full object-cover"
-                        />
-                        <span className="absolute bottom-1.5 right-1.5 rounded-md bg-black/60 px-1.5 py-0.5 text-[9px] text-white">
-                          {art.stage}
-                        </span>
-                      </div>
+                  {weekActs.map((art) => {
+                    const cat = getArtworkCategory(art);
+                    const featured = isArtworkFeatured(art);
 
-                      <div className="p-2.5 space-y-1.5">
-                        <p className="truncate text-xs font-bold text-stone-800">
-                          {art.title}
-                        </p>
-                        <div className="flex items-center justify-between">
-                          <div className="flex items-center gap-1">
-                            <img
-                              src={art.students?.avatar_url}
-                              alt={art.students?.name}
-                              className="h-4 w-4 rounded-full bg-white"
-                            />
-                            <span className="text-[11px] text-stone-600">
-                              {art.students?.name}
-                            </span>
+                    return (
+                      <div
+                        key={art.id}
+                        className="group overflow-hidden rounded-2xl border border-stone-100 bg-stone-50/60 flex flex-col justify-between"
+                      >
+                        <div
+                          onClick={() => setLightboxArtwork(art)}
+                          className="relative aspect-square overflow-hidden bg-stone-200 cursor-pointer"
+                        >
+                          <img
+                            src={art.image_url}
+                            alt={art.title}
+                            loading="lazy"
+                            className="h-full w-full object-cover"
+                          />
+                          {/* 左上角：作品分类标签 */}
+                          <span className="absolute left-1.5 top-1.5 rounded-md bg-amber-500/95 px-1.5 py-0.5 text-[9px] font-bold text-white shadow-sm">
+                            {cat}
+                          </span>
+
+                          {/* 老师登录时：右上角一键挑入「光影画廊」按钮 */}
+                          {isTeacherAuthenticated && (
+                            <button
+                              onClick={(e) => handleQuickToggleFeatured(e, art)}
+                              className={`absolute right-1.5 top-1.5 rounded-full p-1.5 shadow-md ${
+                                featured
+                                  ? 'bg-amber-400 text-stone-900'
+                                  : 'bg-black/50 text-white/80'
+                              }`}
+                              title={featured ? '已选入光影画廊' : '点击选入光影画廊'}
+                            >
+                              <Star className={`h-3 w-3 ${featured ? 'fill-stone-900' : ''}`} />
+                            </button>
+                          )}
+
+                          <span className="absolute bottom-1.5 right-1.5 rounded-md bg-black/60 px-1.5 py-0.5 text-[9px] text-white">
+                            {art.stage}
+                          </span>
+                        </div>
+
+                        <div className="p-2.5 space-y-1.5">
+                          <p className="truncate text-xs font-bold text-stone-800">
+                            {art.title}
+                          </p>
+                          <div className="flex items-center justify-between">
+                            <div className="flex items-center gap-1">
+                              <img
+                                src={art.students?.avatar_url}
+                                alt={art.students?.name}
+                                className="h-4 w-4 rounded-full bg-white"
+                              />
+                              <span className="text-[11px] text-stone-600">
+                                {art.students?.name}
+                              </span>
+                            </div>
+                            <button
+                              onClick={() => setActiveCommentArtwork(art)}
+                              className="flex items-center gap-0.5 rounded-full px-1.5 py-0.5 text-[10px] text-stone-400 hover:text-amber-600"
+                            >
+                              <MessageCircle className="h-3.5 w-3.5" />
+                              {(art.comments?.length || 0) > 0 && (
+                                <span>{art.comments?.length}</span>
+                              )}
+                            </button>
                           </div>
-                          <button
-                            onClick={() => setActiveCommentArtwork(art)}
-                            className="flex items-center gap-0.5 rounded-full px-1.5 py-0.5 text-[10px] text-stone-400 hover:text-amber-600"
-                          >
-                            <MessageCircle className="h-3.5 w-3.5" />
-                            {(art.comments?.length || 0) > 0 && (
-                              <span>{art.comments?.length}</span>
-                            )}
-                          </button>
                         </div>
                       </div>
-                    </div>
-                  ))}
+                    );
+                  })}
                 </div>
               </section>
             );
@@ -565,7 +820,7 @@ export default function App() {
       )}
 
       {/* 底部老师后台管理与工作台入口（唯一保留的登录入口） */}
-      <footer className="mt-12 py-6 text-center text-[11px] text-stone-400">
+      <footer className="mt-10 py-6 text-center text-[11px] text-stone-400">
         {isTeacherAuthenticated ? (
           <div className="inline-flex items-center gap-3 rounded-full bg-emerald-50 px-4 py-1.5 text-emerald-700 border border-emerald-200">
             <span className="flex items-center gap-1 font-medium">
@@ -603,27 +858,80 @@ export default function App() {
         )}
       </footer>
 
-      {/* 老师已登录时：悬浮双按钮（后台管理中心 + 随堂拍照点评） */}
+      {/* 老师已登录时：位于底部导航栏上方的悬浮双按钮（后台管理 + 随堂拍照点评） */}
       {isTeacherAuthenticated && (
-        <div className="fixed bottom-6 right-4 z-40 flex items-center gap-2">
+        <div className="fixed bottom-20 right-4 z-40 flex items-center gap-2">
           <button
             onClick={() => setShowAdminDashboard(true)}
-            className="flex items-center gap-1.5 rounded-full bg-white px-4 py-3.5 text-xs font-bold text-stone-800 shadow-xl border border-stone-200 active:scale-95"
+            className="flex items-center gap-1.5 rounded-full bg-white px-4 py-3 text-xs font-bold text-stone-800 shadow-xl border border-stone-200 active:scale-95"
           >
             <Settings className="h-4 w-4 text-amber-500" />
             <span>后台管理</span>
           </button>
           <button
             onClick={() => setShowUploadModal(true)}
-            className="flex items-center gap-2 rounded-full bg-stone-900 px-5 py-3.5 text-xs font-bold text-white shadow-xl shadow-stone-900/30 active:scale-95"
+            className="flex items-center gap-2 rounded-full bg-stone-900 px-4 py-3 text-xs font-bold text-white shadow-xl shadow-stone-900/30 active:scale-95"
           >
             <Camera className="h-4 w-4 text-amber-400" />
-            <span>随堂拍照点评</span>
+            <span>拍照上传</span>
           </button>
         </div>
       )}
 
-      {/* 老师登录弹窗 (支持底部触发或 /admin、/teacher/login 路径) */}
+      {/* ==================== 底部固定导航栏（APP 风格） ==================== */}
+      <nav className="fixed bottom-0 inset-x-0 z-40 mx-auto max-w-md border-t border-stone-200/80 bg-white/95 px-4 py-2 backdrop-blur-md shadow-[0_-4px_20px_rgba(0,0,0,0.05)]">
+        <div className="grid grid-cols-3 gap-1">
+          <button
+            onClick={() => setActiveTab('gallery')}
+            className={`flex flex-col items-center justify-center gap-1 rounded-2xl py-1.5 transition ${
+              activeTab === 'gallery'
+                ? 'text-amber-600 font-bold'
+                : 'text-stone-400 font-medium hover:text-stone-600'
+            }`}
+          >
+            <Sparkles
+              className={`h-5 w-5 ${
+                activeTab === 'gallery' ? 'text-amber-500 fill-amber-500/20' : ''
+              }`}
+            />
+            <span className="text-[11px]">光影画廊</span>
+          </button>
+
+          <button
+            onClick={() => setActiveTab('timeline')}
+            className={`flex flex-col items-center justify-center gap-1 rounded-2xl py-1.5 transition ${
+              activeTab === 'timeline'
+                ? 'text-amber-600 font-bold'
+                : 'text-stone-400 font-medium hover:text-stone-600'
+            }`}
+          >
+            <Clock
+              className={`h-5 w-5 ${
+                activeTab === 'timeline' ? 'text-amber-500' : ''
+              }`}
+            />
+            <span className="text-[11px]">个人时光机</span>
+          </button>
+
+          <button
+            onClick={() => setActiveTab('classroom')}
+            className={`flex flex-col items-center justify-center gap-1 rounded-2xl py-1.5 transition ${
+              activeTab === 'classroom'
+                ? 'text-amber-600 font-bold'
+                : 'text-stone-400 font-medium hover:text-stone-600'
+            }`}
+          >
+            <LayoutGrid
+              className={`h-5 w-5 ${
+                activeTab === 'classroom' ? 'text-amber-500' : ''
+              }`}
+            />
+            <span className="text-[11px]">课堂展厅</span>
+          </button>
+        </div>
+      </nav>
+
+      {/* 老师登录弹窗 */}
       {showTeacherLogin && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-5 backdrop-blur-sm">
           <div className="w-full max-w-xs rounded-3xl bg-white p-6 shadow-2xl space-y-4">
@@ -679,6 +987,7 @@ export default function App() {
         onClose={() => setShowUploadModal(false)}
         students={students}
         weeks={weeks}
+        existingCategories={allCategories}
         onUploadSuccess={loadGalleryData}
       />
 
