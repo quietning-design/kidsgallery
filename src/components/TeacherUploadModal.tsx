@@ -1,6 +1,23 @@
 import React, { useState, useRef, useEffect } from 'react';
-import { Camera, ImagePlus, UploadCloud, X, Loader2, Sparkles } from 'lucide-react';
-import { supabase, Student, CurriculumWeek, StageType } from '../lib/supabase';
+import {
+  Camera,
+  ImagePlus,
+  UploadCloud,
+  X,
+  Loader2,
+  Sparkles,
+  Plus,
+  Star,
+  Palette,
+} from 'lucide-react';
+import {
+  supabase,
+  Student,
+  CurriculumWeek,
+  StageType,
+  PRESET_CATEGORIES,
+  buildTagsWithMeta,
+} from '../lib/supabase';
 import { compressToWebP, CompressedResult } from '../lib/imageCompressor';
 
 interface TeacherUploadModalProps {
@@ -8,22 +25,37 @@ interface TeacherUploadModalProps {
   onClose: () => void;
   students: Student[];
   weeks: CurriculumWeek[];
+  existingCategories: string[];
   onUploadSuccess: () => void;
 }
 
 const PRESET_TAGS = ['色彩对比', '构图饱满', '线条流畅', '天马行空', '观察细致', '笔触大胆', '专注投入'];
 const STAGES: StageType[] = ['草图构思', '色彩打底', '最终成作'];
+const CUSTOM_CAT_STORAGE_KEY = 'gallery_custom_categories';
 
 export const TeacherUploadModal: React.FC<TeacherUploadModalProps> = ({
   isOpen,
   onClose,
   students,
   weeks,
+  existingCategories,
   onUploadSuccess,
 }) => {
   const [selectedStudentId, setSelectedStudentId] = useState('');
   const [selectedWeekId, setSelectedWeekId] = useState('');
   const [stage, setStage] = useState<StageType>('最终成作');
+  const [category, setCategory] = useState<string>('儿童画');
+  const [customCategories, setCustomCategories] = useState<string[]>(() => {
+    try {
+      return JSON.parse(localStorage.getItem(CUSTOM_CAT_STORAGE_KEY) || '[]');
+    } catch {
+      return [];
+    }
+  });
+  const [showCustomCatInput, setShowCustomCatInput] = useState(false);
+  const [newCatText, setNewCatText] = useState('');
+  const [isFeatured, setIsFeatured] = useState(true);
+
   const [title, setTitle] = useState('');
   const [comment, setComment] = useState('');
   const [selectedTags, setSelectedTags] = useState<string[]>(['色彩对比']);
@@ -44,6 +76,24 @@ export const TeacherUploadModal: React.FC<TeacherUploadModalProps> = ({
   }, [students, weeks, selectedStudentId, selectedWeekId]);
 
   if (!isOpen) return null;
+
+  // 合并预设分类 + 历史作品分类 + 老师本地自定义分类（去重）
+  const allCategories = Array.from(
+    new Set([...PRESET_CATEGORIES, ...existingCategories, ...customCategories])
+  );
+
+  const handleAddCustomCategory = () => {
+    const clean = newCatText.trim();
+    if (!clean) return;
+    if (!customCategories.includes(clean)) {
+      const updated = [...customCategories, clean];
+      setCustomCategories(updated);
+      localStorage.setItem(CUSTOM_CAT_STORAGE_KEY, JSON.stringify(updated));
+    }
+    setCategory(clean);
+    setNewCatText('');
+    setShowCustomCatInput(false);
+  };
 
   const handleFileSelect = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const files = Array.from(e.target.files || []);
@@ -82,6 +132,8 @@ export const TeacherUploadModal: React.FC<TeacherUploadModalProps> = ({
 
     setIsUploading(true);
     try {
+      const finalTags = buildTagsWithMeta(selectedTags, category, isFeatured);
+
       for (let i = 0; i < compressedItems.length; i++) {
         const item = compressedItems[i];
         const storagePath = `artworks/${selectedStudentId}/${item.file.name}`;
@@ -114,7 +166,7 @@ export const TeacherUploadModal: React.FC<TeacherUploadModalProps> = ({
           image_url: publicUrlData.publicUrl,
           stage,
           teacher_comment: comment.trim(),
-          tags: selectedTags,
+          tags: finalTags,
         });
 
         if (insertErr) throw insertErr;
@@ -169,7 +221,6 @@ export const TeacherUploadModal: React.FC<TeacherUploadModalProps> = ({
               <span className="text-xs font-semibold">相册批量选择</span>
             </button>
 
-            {/* 隐藏 Input：相机直拍与相册多选 */}
             <input
               ref={cameraInputRef}
               type="file"
@@ -241,10 +292,64 @@ export const TeacherUploadModal: React.FC<TeacherUploadModalProps> = ({
             </div>
           </div>
 
-          {/* 3. 选择教学周次与创作阶段 */}
+          {/* 3. 新增：作品分类（原创、水彩、素描、儿童画 + 自定义分类） */}
+          <div>
+            <label className="flex items-center justify-between text-xs font-semibold text-stone-600 mb-2">
+              <span className="flex items-center gap-1">
+                <Palette className="h-3.5 w-3.5 text-amber-500" />
+                作品分类（支持自定义）
+              </span>
+              <button
+                type="button"
+                onClick={() => setShowCustomCatInput((v) => !v)}
+                className="flex items-center gap-0.5 text-[11px] font-semibold text-amber-600"
+              >
+                <Plus className="h-3 w-3" />
+                <span>自定义新分类</span>
+              </button>
+            </label>
+
+            {showCustomCatInput && (
+              <div className="mb-2.5 flex gap-2">
+                <input
+                  type="text"
+                  value={newCatText}
+                  onChange={(e) => setNewCatText(e.target.value)}
+                  placeholder="输入新分类名称（如：国画、版画、速写）"
+                  className="flex-1 rounded-xl border border-amber-300 bg-amber-50/40 px-3 py-1.5 text-xs text-stone-800 focus:outline-none"
+                />
+                <button
+                  type="button"
+                  onClick={handleAddCustomCategory}
+                  className="rounded-xl bg-amber-500 px-3 py-1.5 text-xs font-bold text-white shrink-0"
+                >
+                  添加并选中
+                </button>
+              </div>
+            )}
+
+            <div className="flex flex-wrap gap-1.5">
+              {allCategories.map((cat) => (
+                <button
+                  type="button"
+                  key={cat}
+                  onClick={() => setCategory(cat)}
+                  className={`rounded-full px-3 py-1.5 text-xs font-semibold border transition ${
+                    category === cat
+                      ? 'border-stone-900 bg-stone-900 text-white shadow-sm'
+                      : 'border-stone-200 bg-white text-stone-600'
+                  }`}
+                >
+                  {cat}
+                </button>
+              ))}
+            </div>
+          </div>
+
+          {/* 4. 选择教学周次与创作阶段 */}
           <div className="grid grid-cols-1 gap-3">
             <div>
-              <label className="block text-xs font-semibold text-stone-600 mb-1.5">教学周次</label>
+              <label className="block text-xs font-semibold text-stone-600 mb-1.5">教学周次（课堂展厅归档）</label>
               <select
                 value={selectedWeekId}
                 onChange={(e) => setSelectedWeekId(e.target.value)}
@@ -277,7 +382,39 @@ export const TeacherUploadModal: React.FC<TeacherUploadModalProps> = ({
             </div>
           </div>
 
-          {/* 4. 作品名称与老师专业评语 */}
+          {/* 5. 选入首页「光影画廊」精选开关 */}
+          <div
+            onClick={() => setIsFeatured((v) => !v)}
+            className={`flex cursor-pointer items-center justify-between rounded-2xl border p-3 transition ${
+              isFeatured
+                ? 'border-amber-300 bg-amber-50/70'
+                : 'border-stone-200 bg-stone-50'
+            }`}
+          >
+            <div className="flex items-center gap-2.5">
+              <div
+                className={`flex h-8 w-8 items-center justify-center rounded-xl ${
+                  isFeatured ? 'bg-amber-500 text-white' : 'bg-stone-200 text-stone-500'
+                }`}
+              >
+                <Star className="h-4 w-4 fill-current" />
+              </div>
+              <div>
+                <p className="text-xs font-bold text-stone-800">同步推荐至首页「光影画廊」</p>
+                <p className="text-[10px] text-stone-500">
+                  勾选后该画作将作为画室精选佳作在首页展示
+                </p>
+              </div>
+            </div>
+            <input
+              type="checkbox"
+              checked={isFeatured}
+              onChange={() => {}}
+              className="h-4 w-4 accent-amber-500"
+            />
+          </div>
+
+          {/* 6. 作品名称与老师专业评语 */}
           <div>
             <input
               type="text"
@@ -293,12 +430,12 @@ export const TeacherUploadModal: React.FC<TeacherUploadModalProps> = ({
               rows={3}
               value={comment}
               onChange={(e) => setComment(e.target.value)}
-              placeholder="输入随堂观察与鼓励评语..."
+              placeholder="输入随堂观察与鼓励评语（将在个人时光机置顶显示）..."
               className="w-full rounded-xl border border-stone-200 bg-white p-3.5 text-xs text-stone-800 focus:border-amber-500 focus:outline-none"
             />
           </div>
 
-          {/* 5. 能力标签选择 */}
+          {/* 7. 能力标签选择 */}
           <div>
             <label className="flex items-center gap-1 text-xs font-semibold text-stone-600 mb-2">
               <Sparkles className="h-3.5 w-3.5 text-amber-500" />
@@ -336,7 +473,7 @@ export const TeacherUploadModal: React.FC<TeacherUploadModalProps> = ({
             ) : (
               <>
                 <UploadCloud className="h-4 w-4" />
-                <span>一键发布至成长档案 ({compressedItems.length} 张)</span>
+                <span>一键发布作品 ({compressedItems.length} 张)</span>
               </>
             )}
           </button>
