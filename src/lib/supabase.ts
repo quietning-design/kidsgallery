@@ -15,6 +15,8 @@ export const supabase = createClient(supabaseUrl, supabaseAnonKey);
 
 export type StageType = '草图构思' | '色彩打底' | '最终成作';
 
+export const PRESET_CATEGORIES = ['原创', '水彩', '素描', '儿童画', '油画棒', '综合材料'];
+
 export interface Student {
   id: string;
   name: string;
@@ -30,6 +32,16 @@ export interface CurriculumWeek {
   title: string;
   theme_desc: string;
   start_date: string;
+}
+
+export interface CommentItem {
+  id: string;
+  artwork_id: string;
+  author_name: string;
+  author_role: 'teacher' | 'parent';
+  content: string;
+  created_at: string;
+  isOptimistic?: boolean;
 }
 
 export interface Artwork {
@@ -48,17 +60,50 @@ export interface Artwork {
   comments?: CommentItem[];
 }
 
-export interface CommentItem {
-  id: string;
-  artwork_id: string;
-  author_name: string;
-  author_role: 'teacher' | 'parent';
-  content: string;
-  created_at: string;
-  isOptimistic?: boolean;
+/**
+ * 从作品 tags 中提取作品分类（如 'cat:水彩' -> '水彩'），默认返回 '儿童画'
+ */
+export function getArtworkCategory(art: Pick<Artwork, 'tags'>): string {
+  const found = (art.tags || []).find((t) => t.startsWith('cat:'));
+  return found ? found.slice(4) : '儿童画';
 }
 
-// 本地未配置 .env 时的演示回退数据
+/**
+ * 判断作品是否被挑入首页「光影画廊」精选
+ */
+export function isArtworkFeatured(art: Pick<Artwork, 'tags'>): boolean {
+  return (art.tags || []).includes('featured:true');
+}
+
+/**
+ * 提取普通能力标签（过滤掉内部元数据前缀 cat: 与 featured:）
+ */
+export function getVisibleSkillTags(art: Pick<Artwork, 'tags'>): string[] {
+  return (art.tags || []).filter(
+    (t) => !t.startsWith('cat:') && !t.startsWith('featured:')
+  );
+}
+
+/**
+ * 组装保存至数据库的 tags 数组（包含能力标签 + 作品分类 + 首页精选标记）
+ */
+export function buildTagsWithMeta(
+  skillTags: string[],
+  category: string,
+  isFeatured: boolean
+): string[] {
+  const cleanSkills = skillTags.filter(
+    (t) => !t.startsWith('cat:') && !t.startsWith('featured:')
+  );
+  const cleanCategory = (category || '儿童画').trim();
+  const result = [...cleanSkills, `cat:${cleanCategory}`];
+  if (isFeatured) {
+    result.push('featured:true');
+  }
+  return result;
+}
+
+// 本地演示数据
 export const DEMO_STUDENTS: Student[] = [
   {
     id: '11111111-1111-1111-1111-111111111111',
@@ -112,7 +157,7 @@ export const DEMO_ARTWORKS: Artwork[] = [
     image_url: 'https://images.unsplash.com/photo-1579783902614-a3fb3927b675?auto=format&fit=crop&w=1000&q=80',
     stage: '最终成作',
     teacher_comment: '奔奔今天大胆使用了群青与柠檬黄的强烈对比，花瓣边缘的旋转笔触非常有力量感！',
-    tags: ['色彩对比', '笔触大胆', '天马行空'],
+    tags: ['色彩对比', '笔触大胆', '天马行空', 'cat:水彩', 'featured:true'],
     created_at: '2026-10-28T15:30:00Z',
     students: {
       id: '11111111-1111-1111-1111-111111111111',
@@ -152,7 +197,7 @@ export const DEMO_ARTWORKS: Artwork[] = [
     image_url: 'https://images.unsplash.com/photo-1513364776144-60967b0f800f?auto=format&fit=crop&w=1000&q=80',
     stage: '草图构思',
     teacher_comment: '起形阶段抓住了花盘朝向的不同动态，构图饱满。',
-    tags: ['构图饱满', '观察细致'],
+    tags: ['构图饱满', '观察细致', 'cat:素描'],
     created_at: '2026-10-28T14:20:00Z',
     students: {
       id: '11111111-1111-1111-1111-111111111111',
@@ -165,24 +210,7 @@ export const DEMO_ARTWORKS: Artwork[] = [
       title: '向日葵与梵高星空',
       theme_desc: '学习厚涂肌理与冷暖互补色对比，感受生命力与旋转笔触',
     },
-    comments: [
-      {
-        id: 'c-demo-1',
-        artwork_id: 'dddd1111-1111-1111-1111-111111111111',
-        author_name: '奔奔妈妈',
-        author_role: 'parent',
-        content: '宝贝画的向日葵太有活力啦，挂在客厅超好看！🌻',
-        created_at: '2026-10-28T18:10:00Z',
-      },
-      {
-        id: 'c-demo-2',
-        artwork_id: 'dddd1111-1111-1111-1111-111111111111',
-        author_name: '朵朵外婆',
-        author_role: 'parent',
-        content: '颜色真鲜亮，给小画家点赞👍',
-        created_at: '2026-10-28T19:05:00Z',
-      },
-    ],
+    comments: [],
   },
   {
     id: 'dddd3333-3333-3333-3333-333333333333',
@@ -192,7 +220,7 @@ export const DEMO_ARTWORKS: Artwork[] = [
     image_url: 'https://images.unsplash.com/photo-1541961017774-22349e4a1262?auto=format&fit=crop&w=1000&q=80',
     stage: '最终成作',
     teacher_comment: '朵朵在星空主题里融入了自己最喜欢的小黑猫，紫罗兰渐变过渡得非常细腻温柔。',
-    tags: ['色彩细腻', '故事感强'],
+    tags: ['色彩细腻', '故事感强', 'cat:原创', 'featured:true'],
     created_at: '2026-10-27T16:10:00Z',
     students: {
       id: '22222222-2222-2222-2222-222222222222',
@@ -205,23 +233,6 @@ export const DEMO_ARTWORKS: Artwork[] = [
       title: '向日葵与梵高星空',
       theme_desc: '学习厚涂肌理与冷暖互补色对比，感受生命力与旋转笔触',
     },
-    comments: [
-      {
-        id: 'c-demo-1',
-        artwork_id: 'dddd1111-1111-1111-1111-111111111111',
-        author_name: '奔奔妈妈',
-        author_role: 'parent',
-        content: '宝贝画的向日葵太有活力啦，挂在客厅超好看！🌻',
-        created_at: '2026-10-28T18:10:00Z',
-      },
-      {
-        id: 'c-demo-2',
-        artwork_id: 'dddd1111-1111-1111-1111-111111111111',
-        author_name: '朵朵外婆',
-        author_role: 'parent',
-        content: '颜色真鲜亮，给小画家点赞👍',
-        created_at: '2026-10-28T19:05:00Z',
-      },
-    ],
+    comments: [],
   },
 ];
