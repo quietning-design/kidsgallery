@@ -65,6 +65,7 @@ export const TeacherUploadModal: React.FC<TeacherUploadModalProps> = ({
 
   const cameraInputRef = useRef<HTMLInputElement>(null);
   const albumInputRef = useRef<HTMLInputElement>(null);
+  const uploadingLockRef = useRef(false);
 
   useEffect(() => {
     if (students.length > 0 && !selectedStudentId) {
@@ -127,18 +128,22 @@ export const TeacherUploadModal: React.FC<TeacherUploadModalProps> = ({
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (uploadingLockRef.current || isUploading) return;
     if (!compressedItems.length) return alert('请先拍照或选择画作图片');
     if (!selectedStudentId || !selectedWeekId) return alert('请选择学员与教学周次');
 
+    uploadingLockRef.current = true;
     setIsUploading(true);
     try {
       const finalTags = buildTagsWithMeta(selectedTags, category, isFeatured);
 
       for (let i = 0; i < compressedItems.length; i++) {
         const item = compressedItems[i];
-        const storagePath = `artworks/${selectedStudentId}/${item.file.name}`;
+        const ext = item.file.type === 'image/webp' ? 'webp' : 'jpg';
+        const uniqueKey = `${Date.now()}_${i}_${Math.random().toString(36).slice(2, 9)}`;
+        const storagePath = `artworks/${selectedStudentId}/${uniqueKey}.${ext}`;
 
-        // 1. 上传压缩后的 WebP 至 Supabase Storage
+        // 1. 上传压缩后的 WebP 至 Supabase Storage（每次生成唯一随机路径，杜绝 The resource already exists）
         const { error: uploadErr } = await supabase.storage
           .from('artworks-storage')
           .upload(storagePath, item.file, {
@@ -180,6 +185,7 @@ export const TeacherUploadModal: React.FC<TeacherUploadModalProps> = ({
     } catch (err: any) {
       alert('上传失败：' + (err.message || '请检查老师登录状态'));
     } finally {
+      uploadingLockRef.current = false;
       setIsUploading(false);
     }
   };

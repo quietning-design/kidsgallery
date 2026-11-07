@@ -68,8 +68,8 @@ export async function compressToWebP(
   }
 
   const ext = mimeType === 'image/webp' ? 'webp' : 'jpg';
-  const safeBaseName = sourceFile.name.replace(/\.[^/.]+$/, '').replace(/[^a-zA-Z0-9_-]/g, '_');
-  const fileName = `${Date.now()}_${safeBaseName}.${ext}`;
+  const rand = Math.random().toString(36).slice(2, 9);
+  const fileName = `${Date.now()}_${rand}.${ext}`;
   const compressedFile = new File([blob], fileName, { type: mimeType });
 
   return {
