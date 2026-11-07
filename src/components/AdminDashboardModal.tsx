@@ -63,12 +63,44 @@ export const AdminDashboardModal: React.FC<AdminDashboardModalProps> = ({
   const [stuHours, setStuHours] = useState('16');
   const [stuAvatarSeed, setStuAvatarSeed] = useState('Felix');
 
+  // 根据已有周次自动推算下一个未占用的周次编码（如已有 2026-W45 则自动变为 2026-W46）
+  const getNextAvailableWeekCode = (existingList: CurriculumWeek[]) => {
+    const existingCodes = new Set(existingList.map((w) => w.week_code.toUpperCase()));
+    let maxWeekNum = 44;
+    const year = new Date().getFullYear();
+
+    for (const w of existingList) {
+      const match = w.week_code.match(/W(\d+)/i);
+      if (match) {
+        const num = parseInt(match[1], 10);
+        if (!isNaN(num) && num > maxWeekNum) {
+          maxWeekNum = num;
+        }
+      }
+    }
+
+    let nextNum = maxWeekNum + 1;
+    let candidate = `${year}-W${String(nextNum).padStart(2, '0')}`;
+    while (existingCodes.has(candidate.toUpperCase())) {
+      nextNum++;
+      candidate = `${year}-W${String(nextNum).padStart(2, '0')}`;
+    }
+    return candidate;
+  };
+
   // 2. 新增/编辑教学周次表单状态
   const [editingWeekId, setEditingWeekId] = useState<string | null>(null);
-  const [weekCode, setWeekCode] = useState('2026-W45');
+  const [weekCode, setWeekCode] = useState(() => getNextAvailableWeekCode(weeks));
   const [weekTitle, setWeekTitle] = useState('');
   const [weekDesc, setWeekDesc] = useState('');
   const [weekDate, setWeekDate] = useState(() => new Date().toISOString().slice(0, 10));
+
+  // 当周次列表刷新且未处于编辑状态时，自动更新为下一个可用周次编号
+  useEffect(() => {
+    if (!editingWeekId) {
+      setWeekCode(getNextAvailableWeekCode(weeks));
+    }
+  }, [weeks, editingWeekId]);
 
   // 3. 编辑作品状态
   const [editingArtwork, setEditingArtwork] = useState<Artwork | null>(null);
@@ -169,17 +201,33 @@ export const AdminDashboardModal: React.FC<AdminDashboardModalProps> = ({
     setTimeout(() => setCopiedId(null), 2000);
   };
 
-  // 保存教学周次
+  // 保存教学周次（自动处理重复周次编号冲突）
   const handleSaveWeek = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!weekCode.trim() || !weekTitle.trim()) return alert('请填写周次编号和课程主题');
     setLoading(true);
     try {
+      let finalCode = weekCode.trim();
+      const existingCodes = new Set(
+        weeks
+          .filter((w) => w.id !== editingWeekId)
+          .map((w) => w.week_code.toUpperCase())
+      );
+
       if (editingWeekId) {
+        // 编辑模式下若修改后的编号与其他周次重名，自动附加序号
+        if (existingCodes.has(finalCode.toUpperCase())) {
+          let suffix = 2;
+          while (existingCodes.has(`${finalCode}-${suffix}`.toUpperCase())) {
+            suffix++;
+          }
+          finalCode = `${finalCode}-${suffix}`;
+        }
+
         const { error } = await supabase
           .from('curriculum_weeks')
           .update({
-            week_code: weekCode.trim(),
+            week_code: finalCode,
             title: weekTitle.trim(),
             theme_desc: weekDesc.trim(),
             start_date: weekDate,
@@ -187,8 +235,17 @@ export const AdminDashboardModal: React.FC<AdminDashboardModalProps> = ({
           .eq('id', editingWeekId);
         if (error) throw error;
       } else {
+        // 新增模式下：如果输入的周次编号已存在（如同一周开设第2门主题课），自动附加 -2 / -3 避免唯一索引报错
+        if (existingCodes.has(finalCode.toUpperCase())) {
+          let suffix = 2;
+          while (existingCodes.has(`${finalCode}-${suffix}`.toUpperCase())) {
+            suffix++;
+          }
+          finalCode = `${finalCode}-${suffix}`;
+        }
+
         const { error } = await supabase.from('curriculum_weeks').insert({
-          week_code: weekCode.trim(),
+          week_code: finalCode,
           title: weekTitle.trim(),
           theme_desc: weekDesc.trim(),
           start_date: weekDate,
