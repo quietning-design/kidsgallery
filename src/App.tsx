@@ -277,9 +277,11 @@ export default function App() {
       {/* 顶部品牌导航栏（无需任何登录密码，直接显示已记住的评论人身份） */}
       <header className="sticky top-0 z-30 flex items-center justify-between bg-[#FAF7F2]/90 px-4 py-3.5 backdrop-blur-md border-b border-stone-200/60">
         <div className="flex items-center gap-2">
-          <div className="flex h-8 w-8 items-center justify-center rounded-xl bg-amber-500 text-white font-bold shadow-sm">
-            画
-          </div>
+          <img
+            src="./icon-192.png"
+            alt="光影画廊"
+            className="h-8 w-8 rounded-xl shadow-sm object-cover"
+          />
           <div>
             <h1 className="text-sm font-bold tracking-tight text-stone-900">
               光影少儿美育画廊
