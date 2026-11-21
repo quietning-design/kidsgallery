@@ -38,19 +38,21 @@ export const CommentDrawer: React.FC<CommentDrawerProps> = ({
       setIsEditingName(true);
     }
 
+    // 立即预填内存中已加载的评论，避免弹窗刚打开时短暂闪烁“还没有亲友评论”
+    setComments(artwork.comments || []);
+
     if (!isSupabaseConfigured) {
-      setComments(artwork.comments || []);
       return;
     }
 
-    // 1. 初始拉取该作品评论
+    // 1. 初始拉取该作品最新评论
     const fetchComments = async () => {
-      const { data } = await supabase
+      const { data, error } = await supabase
         .from('comments')
         .select('*')
         .eq('artwork_id', artwork.id)
         .order('created_at', { ascending: true });
-      if (data) setComments(data);
+      if (!error && data) setComments(data);
     };
     fetchComments();
 

@@ -45,10 +45,18 @@ export default function App() {
   const [activeTab, setActiveTab] = useState<'gallery' | 'timeline' | 'classroom'>('gallery');
   const [selectedCategory, setSelectedCategory] = useState<string>('全部');
 
-  const [students, setStudents] = useState<Student[]>(DEMO_STUDENTS);
-  const [weeks, setWeeks] = useState<CurriculumWeek[]>(DEMO_WEEKS);
-  const [artworks, setArtworks] = useState<Artwork[]>(DEMO_ARTWORKS);
-  const [currentStudent, setCurrentStudent] = useState<Student | null>(DEMO_STUDENTS[0]);
+  const [students, setStudents] = useState<Student[]>(() =>
+    isSupabaseConfigured ? [] : DEMO_STUDENTS
+  );
+  const [weeks, setWeeks] = useState<CurriculumWeek[]>(() =>
+    isSupabaseConfigured ? [] : DEMO_WEEKS
+  );
+  const [artworks, setArtworks] = useState<Artwork[]>(() =>
+    isSupabaseConfigured ? [] : DEMO_ARTWORKS
+  );
+  const [currentStudent, setCurrentStudent] = useState<Student | null>(() =>
+    isSupabaseConfigured ? null : DEMO_STUDENTS[0]
+  );
 
   // 记住的评论人昵称状态（顶部展示与修改）
   const [savedNickname, setSavedNickname] = useState(
@@ -105,7 +113,10 @@ export default function App() {
       setStudents(stuData);
       const lastStuId = localStorage.getItem(STORAGE_STUDENT_ID_KEY);
       const matched = lastStuId ? stuData.find((s) => s.id === lastStuId) : null;
-      setCurrentStudent((prev) => matched || prev || stuData[0]);
+      setCurrentStudent((prev) => {
+        const validPrev = prev ? stuData.find((s) => s.id === prev.id) : null;
+        return matched || validPrev || stuData[0];
+      });
     }
     if (weekData && weekData.length > 0) setWeeks(weekData);
     if (artData) setArtworks(artData as Artwork[]);
@@ -516,7 +527,9 @@ export default function App() {
                   <p className="text-[10px] text-amber-100">累计作品(幅)</p>
                 </div>
                 <div className="border-x border-white/15">
-                  <p className="text-lg font-extrabold">{weeks.length}</p>
+                  <p className="text-lg font-extrabold">
+                    {new Set(studentArtworks.map((a) => a.week_id).filter(Boolean)).size}
+                  </p>
                   <p className="text-[10px] text-amber-100">点亮主题(周)</p>
                 </div>
                 {isTeacherAuthenticated ? (
